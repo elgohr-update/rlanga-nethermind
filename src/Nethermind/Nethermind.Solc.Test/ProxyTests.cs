@@ -20,25 +20,25 @@ using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 using Newtonsoft.Json;
 
-namespace Nethermind.LibSolc.Test
+namespace Nethermind.Solc.Test
 {
     [TestFixture]
-    public class LibSolcTests
+    public class SolcTests
     {
         [Test]
         public void Get_License()
         {
             string result = Proxy.GetSolcLicense();
             Assert.NotNull(result);
-            TestContext.WriteLine(result);
+            TestContext.Out.WriteLine(result);
         }
 
         [Test]
         public void Get_Version()
         {
             string result = Proxy.GetSolcVersion();
+            TestContext.Out.WriteLine(result);
             Assert.NotNull(result);
-            TestContext.WriteLine(result);
         }
 
         [Test]
@@ -51,7 +51,7 @@ namespace Nethermind.LibSolc.Test
             JObject compiledCode = JObject.Parse(result);
             Assert.NotNull(result);
             Assert.NotNull(compiledCode["contracts"]["test"]["test"]["evm"]["bytecode"]["object"]);
-            TestContext.WriteLine(JToken.Parse(result).ToString(Formatting.Indented));
+            TestContext.Out.WriteLine(JToken.Parse(result).ToString(Formatting.Indented));
         }
 
     }

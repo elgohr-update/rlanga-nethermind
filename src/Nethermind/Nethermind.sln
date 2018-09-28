@@ -123,9 +123,9 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.DataStreams.Test
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.DbDiagnostics", "Nethermind.DbDiagnostics\Nethermind.DbDiagnostics.csproj", "{75EB98BF-A07E-4D6B-BAAB-F37EC0459792}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.LibSolc", "Nethermind.LibSolc\Nethermind.LibSolc.csproj", "{39947D60-6151-4C6E-BFF8-B407676D6858}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.Solc", "Nethermind.Solc\Nethermind.Solc.csproj", "{39947D60-6151-4C6E-BFF8-B407676D6858}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.LibSolc.Test", "Nethermind.LibSolc.Test\Nethermind.LibSolc.Test.csproj", "{39000D58-9F72-4FDC-AB03-AED799129DE6}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.Solc.Test", "Nethermind.Solc.Test\Nethermind.Solc.Test.csproj", "{39000D58-9F72-4FDC-AB03-AED799129DE6}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.Stats", "Nethermind.Stats\Nethermind.Stats.csproj", "{9BEFCE4E-8814-42F4-B405-16195F9E1244}"
 EndProject

@@ -14,9 +14,9 @@
     <PackageReference Include="NUnit3TestAdapter" Version="3.10.0" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Nethermind.LibSolc\Nethermind.LibSolc.csproj">
+    <ProjectReference Include="..\Nethermind.Solc\Nethermind.Solc.csproj">
         <Project>{39947D60-6151-4C6E-BFF8-B407676D6858}</Project>
-        <Name>Nethermind.LibSolc</Name>
+        <Name>Nethermind.Solc</Name>
     </ProjectReference>
   </ItemGroup>
 </Project>

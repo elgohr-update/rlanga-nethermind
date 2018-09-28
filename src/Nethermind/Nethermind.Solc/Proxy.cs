@@ -30,7 +30,7 @@ using System.Security;
 using Nethermind.LibSolc.DataModel;
 using Newtonsoft.Json.Linq;
 
-namespace Nethermind.LibSolc
+namespace Nethermind.Solc
 {
     public static class Proxy
     {
