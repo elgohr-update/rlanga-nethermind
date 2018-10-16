@@ -30,7 +30,7 @@ namespace Nethermind.Evm.Test
     [TestFixture]
     public class Eip1014Tests : VirtualMachineTestsBase
     {
-        protected override UInt256 BlockNumber => RopstenSpecProvider.ConstantinopleBlockNumber;
+        protected override UInt256 BlockNumber => MainNetSpecProvider.ConstantinopleBlockNumber;
 
         private void AssertEip1014(Address address, byte[] code)
         {
@@ -54,7 +54,6 @@ namespace Nethermind.Evm.Test
             Keccak createCodeHash = TestState.UpdateCode(createCode);
             TestState.UpdateCodeHash(TestObject.AddressC, createCodeHash, Spec);
 
-            IsTracingEnabled = true;
             byte[] code = Prepare.EvmCode
                 .Call(TestObject.AddressC, 50000)
                 .PushData(Address.OfContract(TestObject.AddressC, 0))

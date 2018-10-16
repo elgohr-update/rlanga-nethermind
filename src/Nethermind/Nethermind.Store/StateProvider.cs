@@ -35,8 +35,6 @@ namespace Nethermind.Store
     {
         private const int StartCapacity = 8;
 
-        //private readonly LruCache<Address, Account> _longTermCache = new LruCache<Address, Account>(1024 * 1024); // ~100MB
-
         private readonly Dictionary<Address, Stack<int>> _intraBlockCache = new Dictionary<Address, Stack<int>>();
 
         private readonly HashSet<Address> _committedThisRound = new HashSet<Address>();
@@ -112,21 +110,13 @@ namespace Nethermind.Store
             Account account = GetThroughCache(address);
             if (account.CodeHash != codeHash)
             {
-                if (_logger.IsTrace)
-                {
-                    _logger.Trace($"  Update code hash of {address} to {codeHash}");
-                }
-
+                if (_logger.IsTrace) _logger.Trace($"  Update code hash of {address} to {codeHash}");
                 Account changedAccount = account.WithChangedCodeHash(codeHash);
                 PushUpdate(address, changedAccount);
             }
             else if (releaseSpec.IsEip158Enabled)
             {
-                if (_logger.IsTrace)
-                {
-                    _logger.Trace($"  Touch {address} (code hash)");
-                }
-
+                if (_logger.IsTrace) _logger.Trace($"  Touch {address} (code hash)");
                 Account touched = GetThroughCache(address);
                 PushTouch(address, touched);
             }
@@ -138,11 +128,7 @@ namespace Nethermind.Store
             {
                 if (releaseSpec.IsEip158Enabled)
                 {
-                    if (_logger.IsTrace)
-                    {
-                        _logger.Trace($"  Touch {address} (balance)");
-                    }
-
+                    if (_logger.IsTrace) _logger.Trace($"  Touch {address} (balance)");
                     Account touched = GetThroughCache(address);
                     PushTouch(address, touched);
                 }
@@ -165,11 +151,7 @@ namespace Nethermind.Store
             UInt256 newBalance = isSubtracting ? account.Balance - balanceChange : account.Balance + balanceChange;
 
             Account changedAccount = account.WithChangedBalance(newBalance);
-            if (_logger.IsTrace)
-            {
-                _logger.Trace($"  Update {address} B = {newBalance} B_CHANGE = {(isSubtracting ? "-" : "+")}{balanceChange}");
-            }
-
+            if (_logger.IsTrace) _logger.Trace($"  Update {address} B = {newBalance} B_CHANGE = {(isSubtracting ? "-" : "+")}{balanceChange}");
             PushUpdate(address, changedAccount);
         }
 
@@ -183,16 +165,18 @@ namespace Nethermind.Store
             SetNewBalance(address, balanceChange, releaseSpec, false);
         }
 
+        /// <summary>
+        /// This is a coupling point between storage provider and state provider.
+        /// This is pointing at the architectural change likely required where Storage and State Provider are represented by a single world state class.
+        /// </summary>
+        /// <param name="address"></param>
+        /// <param name="storageRoot"></param>
         public void UpdateStorageRoot(Address address, Keccak storageRoot)
         {
             Account account = GetThroughCache(address);
             if (account.StorageRoot != storageRoot)
             {
-                if (_logger.IsTrace)
-                {
-                    _logger.Trace($"  Update {address} storage root = {storageRoot}");
-                }
-
+                if (_logger.IsTrace) _logger.Trace($"  Update {address} storage root = {storageRoot}");
                 Account changedAccount = account.WithChangedStorageRoot(storageRoot);
                 PushUpdate(address, changedAccount);
             }
@@ -252,11 +236,7 @@ namespace Nethermind.Store
 
         public int TakeSnapshot()
         {
-            if (_logger.IsTrace)
-            {
-                _logger.Trace($"  State snapshot {_currentPosition}");
-            }
-
+            if (_logger.IsTrace) _logger.Trace($"State snapshot {_currentPosition}");
             return _currentPosition;
         }
 
@@ -267,11 +247,7 @@ namespace Nethermind.Store
                 throw new InvalidOperationException($"{nameof(StateProvider)} tried to restore snapshot {snapshot} beyond current position {_currentPosition}");
             }
 
-            if (_logger.IsTrace)
-            {
-                _logger.Trace($"  Restoring state snapshot {snapshot}");
-            }
-
+            if (_logger.IsTrace) _logger.Trace($"Restoring state snapshot {snapshot}");
             if (snapshot == _currentPosition)
             {
                 return;
@@ -322,11 +298,7 @@ namespace Nethermind.Store
 
         public void CreateAccount(Address address, UInt256 balance)
         {
-            if (_logger.IsTrace)
-            {
-                _logger.Trace($"  CREATING ACCOUNT: {address} with balance {balance}");
-            }
-
+            if (_logger.IsTrace) _logger.Trace($"Creating account: {address} with balance {balance}");
             Account account = balance.IsZero ? Account.TotallyEmpty : new Account(balance);
             PushNew(address, account);
         }
@@ -335,19 +307,11 @@ namespace Nethermind.Store
         {
             if (_currentPosition == -1)
             {
-                if (_logger.IsTrace)
-                {
-                    _logger.Trace("  no state changes to commit");
-                }
-
+                if (_logger.IsTrace) _logger.Trace("  no state changes to commit");
                 return;
             }
 
-            if (_logger.IsTrace)
-            {
-                _logger.Trace($"  committing state changes (at {_currentPosition})");
-            }
-
+            if (_logger.IsTrace) _logger.Trace($"  committing state changes (at {_currentPosition})");
             if (_changes[_currentPosition] == null)
             {
                 throw new InvalidOperationException($"Change at current position {_currentPosition} was null when commiting {nameof(StateProvider)}");
@@ -385,20 +349,12 @@ namespace Nethermind.Store
                     {
                         if (releaseSpec.IsEip158Enabled && change.Account.IsEmpty)
                         {
-                            if (_logger.IsTrace)
-                            {
-                                _logger.Trace($"  Remove empty {change.Address} B = {change.Account.Balance} N = {change.Account.Nonce}");
-                            }
-
+                            if (_logger.IsTrace) _logger.Trace($"  Remove empty {change.Address} B = {change.Account.Balance} N = {change.Account.Nonce}");
                             SetState(change.Address, null);
                         }
                         else
                         {
-                            if (_logger.IsTrace)
-                            {
-                                _logger.Trace($"  Update {change.Address} B = {change.Account.Balance} N = {change.Account.Nonce}");
-                            }
-
+                            if (_logger.IsTrace) _logger.Trace($"  Update {change.Address} B = {change.Account.Balance} N = {change.Account.Nonce}");
                             SetState(change.Address, change.Account);
                         }
 
@@ -408,11 +364,7 @@ namespace Nethermind.Store
                     {
                         if (!releaseSpec.IsEip158Enabled || !change.Account.IsEmpty)
                         {
-                            if (_logger.IsTrace)
-                            {
-                                _logger.Trace($"  Create {change.Address} B = {change.Account.Balance} N = {change.Account.Nonce}");
-                            }
-
+                            if (_logger.IsTrace) _logger.Trace($"  Create {change.Address} B = {change.Account.Balance} N = {change.Account.Nonce}");
                             SetState(change.Address, change.Account);
                         }
 
@@ -420,11 +372,7 @@ namespace Nethermind.Store
                     }
                     case ChangeType.Delete:
                     {
-                        if (_logger.IsTrace)
-                        {
-                            _logger.Trace($"  Remove {change.Address}");
-                        }
-
+                        if (_logger.IsTrace) _logger.Trace($"  Remove {change.Address}");
                         bool wasItCreatedNow = false;
                         while (_intraBlockCache[change.Address].Count > 0)
                         {
@@ -578,11 +526,7 @@ namespace Nethermind.Store
 
         public void Reset()
         {
-            if (_logger.IsTrace)
-            {
-                _logger.Trace("  CLEARING STATE PROVIDER CACHES");
-            }
-
+            if (_logger.IsTrace) _logger.Trace("Clearing state provider caches");
             _intraBlockCache.Clear();
             _currentPosition = -1;
             _committedThisRound.Clear();

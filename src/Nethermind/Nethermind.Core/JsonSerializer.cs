@@ -18,6 +18,8 @@
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.Linq;
 using Nethermind.Core.Logging;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -66,16 +68,47 @@ namespace Nethermind.Core
                 var token = JToken.Parse(json);
                 if (token is JArray)
                 {
+                    foreach (var tokenElement in (JArray)token)
+                    {
+                        UpdateParams(tokenElement);
+                    }
+
                     return (default, token.ToObject<List<T>>());
                 }
-                return (token.ToObject<T>(), null);
+                UpdateParams(token);
 
+                return (token.ToObject<T>(), null);
             }
             catch (Exception e)
             {
                 _logger.Error("Error during json deserialization", e);
                 return (default, null);
             }
+        }
+
+        private void UpdateParams(JToken token)
+        {
+            var paramsToken = token.SelectToken("params");
+            var values = new List<string>();
+            foreach (var value in paramsToken.Value<IEnumerable<object>>())
+            {
+                var valueString = value?.ToString();
+                if (valueString == null)
+                {
+                    values.Add($"\"null\"");
+                    continue;
+                }
+                
+                if (valueString.StartsWith("{") || valueString.StartsWith("["))
+                {
+                    values.Add(Serialize(valueString));
+                    continue;
+                }
+                values.Add($"\"{valueString}\"");
+            }
+
+            var json = $"[{string.Join(",", values)}]";
+            paramsToken.Replace(JToken.Parse(json));
         }
 
         public string Serialize<T>(T value, bool indented = false)

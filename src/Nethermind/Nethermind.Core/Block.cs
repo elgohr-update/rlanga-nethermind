@@ -32,6 +32,7 @@ namespace Nethermind.Core
         public enum Format
         {
             Full,
+            HashAndNumber,
             Short
         }
 
@@ -147,6 +148,8 @@ namespace Nethermind.Core
             return builder.ToString();
         }
 
+        public bool HasAddressesRecovered => Transactions.Length == 0 || Transactions[0].SenderAddress != null;
+        
         public override string ToString()
         {
             return ToString(Format.Short);
@@ -158,6 +161,15 @@ namespace Nethermind.Core
             {
                 case Format.Full:
                     return ToString(string.Empty);
+                case Format.HashAndNumber:
+                    if (Hash == null)
+                    {
+                        return $"{Number} null";
+                    }
+                    else
+                    {
+                        return $"{Number} ({Hash})";
+                    }
                 default:
                     if (Hash == null)
                     {
@@ -165,7 +177,7 @@ namespace Nethermind.Core
                     }
                     else
                     {
-                        return $"{Number} ({Hash.Bytes.ToHexString().Substring(58, 6)}), tx:{Transactions?.Length,5}";
+                        return $"{Number} ({Hash.ToString().Substring(60, 6)})";
                     }
             }
         }

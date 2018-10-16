@@ -16,8 +16,10 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Threading.Tasks;
 using Nethermind.Core;
+using Nethermind.Evm;
 
 namespace Nethermind.Blockchain
 {
@@ -25,6 +27,13 @@ namespace Nethermind.Blockchain
     {
         void Start();
         Task StopAsync(bool processRemainingBlocks = false);
-        void Process(Block block);
+        Block Process(Block block, ProcessingOptions options, ITraceListener listener);
+        
+        /// <summary>
+        /// Executes a block from the past, stores receipts and tx hash -> block number mapping.
+        /// </summary>
+        /// <param name="block"></param>
+        void AddTxData(Block block); // TODO: tks: should be queued
+        event EventHandler ProcessingQueueEmpty;
     }
 }

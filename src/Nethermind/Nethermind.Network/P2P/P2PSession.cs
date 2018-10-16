@@ -92,7 +92,7 @@ namespace Nethermind.Network.P2P
         {
             get
             {
-                //It is needed for lazy creation of NodeStats, in case  IN connections, publicKey is availible only after handshake
+                //It is needed for lazy creation of NodeStats, in case  IN connections, publicKey is available only after handshake
                 if (_nodeStats == null)
                 {
                     if (RemoteNodeId == null)
@@ -111,7 +111,8 @@ namespace Nethermind.Network.P2P
         // TODO: this should be one level up
         public void EnableSnappy()
         {
-            if (_logger.IsTrace) _logger.Trace($"{RemoteNodeId} Enabling Snappy compression");
+            if (_logger.IsTrace) _logger.Trace($"{RemoteNodeId} Enabling Snappy compression and disabling framing");
+            _context.Channel.Pipeline.Get<NettyPacketSplitter>().DisableFraming();
             _context.Channel.Pipeline.AddBefore($"{nameof(Multiplexor)}#0", null, new SnappyDecoder(_logger));
             _context.Channel.Pipeline.AddBefore($"{nameof(Multiplexor)}#0", null, new SnappyEncoder(_logger));
         }
@@ -159,11 +160,7 @@ namespace Nethermind.Network.P2P
         {
             if (_wasDisconnected)
             {
-                if (_logger.IsTrace)
-                {
-                    _logger.Trace($"Session was already disconnected: {RemoteNodeId}, sessioId: {SessionId}");
-                }
-
+                if (_logger.IsTrace) _logger.Trace($"Session was already disconnected: {RemoteNodeId}, sessioId: {SessionId}");
                 return;
             }
 
@@ -191,7 +188,7 @@ namespace Nethermind.Network.P2P
             {
                 PeerDisconnected.Invoke(this, new DisconnectEventArgs(disconnectReason, disconnectType));
             }
-            else if (_logger.IsWarn) _logger.Warn("No subscriptions for PeerDisconnected");
+            else if (_logger.IsDebug) _logger.Debug("No subscriptions for PeerDisconnected");
 
             //Possible in case of disconnect before p2p initialization
             if (_context == null)

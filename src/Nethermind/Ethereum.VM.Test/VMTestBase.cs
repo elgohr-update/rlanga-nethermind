@@ -38,7 +38,8 @@ namespace Ethereum.VM.Test
 {
     public class VMTestBase
     {
-        private IDbProvider _dbProvider;
+        private ISnapshotableDb _stateDb;
+        private ISnapshotableDb _codeDb;
         private IStorageProvider _storageProvider;
         private IBlockhashProvider _blockhashProvider;
         private IStateProvider _stateProvider;
@@ -48,10 +49,11 @@ namespace Ethereum.VM.Test
         [SetUp]
         public void Setup()
         {
-            _dbProvider = new MemDbProvider(_logManager);
+            _stateDb = new StateDb();
+            _codeDb = new StateDb();
             _blockhashProvider = new TestBlockhashProvider();
-            _stateProvider = new StateProvider(new StateTree(_dbProvider.GetOrCreateStateDb()), _dbProvider.GetOrCreateCodeDb(), _logManager);
-            _storageProvider = new StorageProvider(new MemDbProvider(_logManager), _stateProvider, _logManager);
+            _stateProvider = new StateProvider(new StateTree(_stateDb), _codeDb, _logManager);
+            _storageProvider = new StorageProvider(_stateDb, _stateProvider, _logManager);
         }
 
         public static IEnumerable<VirtualMachineTest> LoadTests(string testSet)
@@ -175,7 +177,6 @@ namespace Ethereum.VM.Test
                 _stateProvider.UpdateCode(accountState.Value.Code);
 
                 _stateProvider.CreateAccount(accountState.Key, accountState.Value.Balance);
-                _stateProvider.UpdateStorageRoot(accountState.Key, _storageProvider.GetRoot(accountState.Key));
                 Keccak codeHash = _stateProvider.UpdateCode(accountState.Value.Code);
                 _stateProvider.UpdateCodeHash(accountState.Key, codeHash, Olympic.Instance);
                 for (int i = 0; i < accountState.Value.Nonce; i++)
@@ -186,19 +187,18 @@ namespace Ethereum.VM.Test
 
             EvmState state = new EvmState((long)test.Execution.Gas, environment, ExecutionType.Transaction, false);
 
+            _storageProvider.Commit(Olympic.Instance);
+            _stateProvider.Commit(Olympic.Instance);
+
+            TransactionSubstate substate = machine.Run(state, Olympic.Instance, false);
             if (test.Out == null)
             {
-                Assert.That(() => machine.Run(state, Olympic.Instance, null), Throws.Exception);
+                Assert.NotNull(substate.Error);
                 return;
             }
 
-            _stateProvider.Commit(Olympic.Instance);
-            _storageProvider.Commit(Olympic.Instance);
-
-            (byte[] output, TransactionSubstate substate) = machine.Run(state, Olympic.Instance, null);
-
-            Assert.True(Bytes.AreEqual(test.Out, output),
-                $"Exp: {test.Out.ToHexString(true)} != Actual: {output.ToHexString(true)}");
+            Assert.True(Bytes.AreEqual(test.Out, substate.Output),
+                $"Exp: {test.Out.ToHexString(true)} != Actual: {substate.Output.ToHexString(true)}");
             Assert.AreEqual((long)test.Gas, state.GasAvailable);
             foreach (KeyValuePair<Address, AccountState> accountState in test.Post)
             {

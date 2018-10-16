@@ -58,11 +58,16 @@ namespace Nethermind.Network.Test
         private ILogManager _logManager;
         
         [SetUp]
-        public async Task Initialize()
+        public void Initialize()
         {
             _logManager = new OneLoggerLogManager(new SimpleConsoleLogger());
             _configurationProvider = new JsonConfigProvider();
-            ((NetworkConfig)_configurationProvider.GetConfig<INetworkConfig>()).DbBasePath = Path.Combine(Path.GetTempPath(), "PeerManagerTests");
+            var config = ((NetworkConfig)_configurationProvider.GetConfig<INetworkConfig>());
+            config.DbBasePath = Path.Combine(Path.GetTempPath(), "PeerManagerTests");
+            config.IsActivePeerTimerEnabled = false;
+            config.IsDiscoveryNodesPersistenceOn = false;
+            config.IsPeersPersistenceOn = false;
+
             if (!Directory.Exists(_configurationProvider.GetConfig<INetworkConfig>().DbBasePath))
             {
                 Directory.CreateDirectory(_configurationProvider.GetConfig<INetworkConfig>().DbBasePath);
@@ -77,8 +82,8 @@ namespace Nethermind.Network.Test
             
             _nodeFactory = new NodeFactory();
             _localPeer = new TestRlpxPeer();
-            var keyProvider = new PrivateKeyProvider(new CryptoRandom());
-            var key = keyProvider.PrivateKey.PublicKey;
+            var keyProvider = new PrivateKeyGenerator(new CryptoRandom());
+            var key = keyProvider.Generate().PublicKey;
             _synchronizationManager = Substitute.For<ISynchronizationManager>();
 
             var nodeTable = new NodeTable(_nodeFactory, Substitute.For<IKeyStore>(), new NodeDistanceCalculator(_configurationProvider), _configurationProvider, _logManager);
@@ -88,9 +93,11 @@ namespace Nethermind.Network.Test
             IStatsConfig statsConfig = _configurationProvider.GetConfig<IStatsConfig>();
             _discoveryManager = new DiscoveryManager(new NodeLifecycleManagerFactory(_nodeFactory, nodeTable, new DiscoveryMessageFactory(_configurationProvider), Substitute.For<IEvictionManager>(), new NodeStatsProvider(_configurationProvider.GetConfig<IStatsConfig>(), _nodeFactory, _logManager), _configurationProvider, _logManager), _nodeFactory, nodeTable, new NetworkStorage("test", networkConfig, _logManager, new PerfService(_logManager)), _configurationProvider, _logManager);
             _discoveryManager.MessageSender = Substitute.For<IMessageSender>();
-
+            var app = new DiscoveryApp(new NodesLocator(nodeTable, _discoveryManager, _configurationProvider, _logManager), _discoveryManager, _nodeFactory, nodeTable, Substitute.For<IMessageSerializationService>(), new CryptoRandom(), Substitute.For<INetworkStorage>(), _configurationProvider, _logManager, new PerfService(_logManager));
+            app.Initialize(key);
+            
             var networkStorage = new NetworkStorage("test", networkConfig, _logManager, new PerfService(_logManager));
-            _peerManager = new PeerManager(_localPeer, _discoveryManager, _synchronizationManager, new NodeStatsProvider(statsConfig, _nodeFactory, _logManager), networkStorage, _nodeFactory, _configurationProvider, new PerfService(_logManager), _logManager);
+            _peerManager = new PeerManager(_localPeer, app, _synchronizationManager, new NodeStatsProvider(statsConfig, _nodeFactory, _logManager), networkStorage, _nodeFactory, _configurationProvider, new PerfService(_logManager), _logManager);
             _peerManager.Init(true);
         }
 
@@ -107,7 +114,8 @@ namespace Nethermind.Network.Test
                 Capabilities = new[] {new Capability(Protocol.Eth, 62)}.ToList(),
             };
             p2pSession.TriggerProtocolInitialized(p2pArgs);
-            Assert.IsTrue(_peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.P2PInitialized));
+            AssertTrue(() => _peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.P2PInitialized), 5000);
+            //Assert.IsTrue();
 
             //trigger eth62 initialization
             var eth62 = new Eth62ProtocolHandler(p2pSession, new MessageSerializationService(), _synchronizationManager, _logManager, new PerfService(_logManager));
@@ -116,18 +124,21 @@ namespace Nethermind.Network.Test
                 ChainId = _synchronizationManager.ChainId
             };
             p2pSession.TriggerProtocolInitialized(args);
-            Assert.IsTrue(_peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.Eth62Initialized));
-            Assert.NotNull(_peerManager.ActivePeers.First().SynchronizationPeer);
+            AssertTrue(() => _peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.Eth62Initialized), 5000);
+            //Assert.IsTrue(_peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.Eth62Initialized));
+            AssertTrue(() => _peerManager.ActivePeers.First().SynchronizationPeer != null, 5000);
+            //Assert.NotNull(_peerManager.ActivePeers.First().SynchronizationPeer);
 
             //verify active peer was added to synch manager
             _synchronizationManager.Received(1).AddPeer(Arg.Any<ISynchronizationPeer>());
 
             //trigger disconnect
             p2pSession.TriggerPeerDisconnected();
-            Assert.AreEqual(1, _peerManager.CandidatePeers.Count);
-            Assert.AreEqual(0, _peerManager.ActivePeers.Count);
 
             //verify active peer was removed from synch manager
+            AssertTrue(() => _peerManager.ActivePeers.Count == 0, 5000);
+            Assert.AreEqual(1, _peerManager.CandidatePeers.Count);
+            //Assert.AreEqual(0, _peerManager.ActivePeers.Count);
             _synchronizationManager.Received(1).RemovePeer(Arg.Any<ISynchronizationPeer>());
         }
 
@@ -153,7 +164,8 @@ namespace Nethermind.Network.Test
                 Capabilities = new[] { new Capability(Protocol.Eth, 62) }.ToList()
             };
             p2pSession.TriggerProtocolInitialized(p2pArgs);
-            Assert.IsTrue(_peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.P2PInitialized));
+            AssertTrue(() => _peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.P2PInitialized), 5000);
+            //Assert.IsTrue(_peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.P2PInitialized));
 
             //trigger eth62 initialization
             var eth62 = new Eth62ProtocolHandler(p2pSession, new MessageSerializationService(), _synchronizationManager, _logManager, new PerfService(_logManager));
@@ -162,19 +174,22 @@ namespace Nethermind.Network.Test
                 ChainId = _synchronizationManager.ChainId
             };
             p2pSession.TriggerProtocolInitialized(args);
+            AssertTrue(() => _peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.Eth62Initialized), 5000);
 
             Assert.AreEqual(1, _peerManager.CandidatePeers.Count);
             Assert.AreEqual(1, _peerManager.ActivePeers.Count);
-            Assert.IsTrue(_peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.Eth62Initialized));
-            Assert.NotNull(_peerManager.ActivePeers.First().SynchronizationPeer);
+            //Assert.IsTrue(_peerManager.ActivePeers.First().NodeStats.DidEventHappen(NodeStatsEventType.Eth62Initialized));
+            AssertTrue(() => _peerManager.ActivePeers.First().SynchronizationPeer != null, 5000);
+            //Assert.NotNull(_peerManager.ActivePeers.First().SynchronizationPeer);
 
             //verify active peer was added to synch manager
             _synchronizationManager.Received(1).AddPeer(Arg.Any<ISynchronizationPeer>());
 
             //trigger disconnect
             p2pSession.TriggerPeerDisconnected();
+            AssertTrue(() => _peerManager.ActivePeers.Count == 0, 5000);
             Assert.AreEqual(1, _peerManager.CandidatePeers.Count);
-            Assert.AreEqual(0, _peerManager.ActivePeers.Count);
+            //Assert.AreEqual(0, _peerManager.ActivePeers.Count);
 
             //verify active peer was removed from synch manager
             _synchronizationManager.Received(1).RemovePeer(Arg.Any<ISynchronizationPeer>());
@@ -193,7 +208,8 @@ namespace Nethermind.Network.Test
                 Capabilities = new[] { new Capability(Protocol.Eth, 62) }.ToList()
             };
             p2pSession.TriggerProtocolInitialized(p2pArgs);
-            Assert.IsTrue(p2pSession.Disconected);
+            AssertTrue(() => p2pSession.Disconected, 5000);
+            //Assert.IsTrue(p2pSession.Disconected);
             Assert.AreEqual(DisconnectReason.IncompatibleP2PVersion, p2pSession.DisconnectReason);
         }
 
@@ -210,7 +226,8 @@ namespace Nethermind.Network.Test
                 Capabilities = new[] { new Capability(Protocol.Eth, 60) }.ToList()
             };
             p2pSession.TriggerProtocolInitialized(p2pArgs);
-            Assert.IsTrue(p2pSession.Disconected);
+            AssertTrue(() => p2pSession.Disconected, 5000);
+            //Assert.IsTrue(p2pSession.Disconected);
             Assert.AreEqual(DisconnectReason.Other, p2pSession.DisconnectReason);
         }
 
@@ -226,7 +243,8 @@ namespace Nethermind.Network.Test
                 ChainId = 100
             };
             p2pSession.TriggerProtocolInitialized(args);
-            Assert.IsTrue(p2pSession.Disconected);
+            AssertTrue(() => p2pSession.Disconected, 5000);
+            //Assert.IsTrue(p2pSession.Disconected);
             Assert.AreEqual(DisconnectReason.Other, p2pSession.DisconnectReason);
         }
 
@@ -235,15 +253,8 @@ namespace Nethermind.Network.Test
         {
             var p2pSession = InitializeNode(ConnectionDirection.In);
 
-            //trigger p2p initialization
-            //var p2pProtocol = new P2PProtocolHandler(p2pSession, new MessageSerializationService(), p2pSession.RemoteNodeId, p2pSession.RemotePort ?? 0, _logManager);
-            //var p2pArgs = new P2PProtocolInitializedEventArgs(p2pProtocol)
-            //{
-            //    P2PVersion = 1,
-            //    Capabilities = new[] { new Capability(Protocol.Eth, 62) }.ToList()
-            //};
-            //p2pSession.TriggerProtocolInitialized(p2pArgs);
-            Assert.IsTrue(p2pSession.Disconected);
+            AssertTrue(() => p2pSession.Disconected, 5000);
+            //Assert.IsTrue(p2pSession.Disconected);
             Assert.AreEqual(DisconnectReason.AlreadyConnected, p2pSession.DisconnectReason);
         }
 
@@ -260,29 +271,25 @@ namespace Nethermind.Network.Test
             _localPeer.TriggerSessionCreated(p2pSession);
             p2pSession.TriggerHandshakeComplete();
 
-            //trigger p2p initialization
-            //var p2pProtocol = new P2PProtocolHandler(p2pSession, new MessageSerializationService(), p2pSession.RemoteNodeId, p2pSession.RemotePort ?? 0, _logManager);
-            //var p2pArgs = new P2PProtocolInitializedEventArgs(p2pProtocol)
-            //{
-            //    P2PVersion = 1,
-            //    Capabilities = new[] { new Capability(Protocol.Eth, 62) }.ToList()
-            //};
-            //p2pSession.TriggerProtocolInitialized(p2pArgs);
-            Assert.IsTrue(p2pSession.Disconected);
+            AssertTrue(() => p2pSession.Disconected, 5000);
+            //Assert.IsTrue(p2pSession.Disconected);
             Assert.AreEqual(DisconnectReason.TooManyPeers, p2pSession.DisconnectReason);
         }
 
         private TestP2PSession InitializeNode(ConnectionDirection connectionDirection = ConnectionDirection.Out)
         {
             var node = _nodeFactory.CreateNode("192.1.1.1", 3333);
+
             _discoveryManager.GetNodeLifecycleManager(node);
+            var task = _peerManager.Start();
+            task.Wait();
 
             //verify new peer is added
             Assert.AreEqual(1, _peerManager.CandidatePeers.Count);
             Assert.AreEqual(node.Id, _peerManager.CandidatePeers.First().Node.Id);
 
             //trigger connection start
-            var task = _peerManager.RunPeerUpdate();
+            task = _peerManager.RunPeerUpdate();
             task.Wait();
             Assert.AreEqual(1, _localPeer.ConnectionAsyncCallsCounter);
             Assert.AreEqual(1, _peerManager.CandidatePeers.Count);
@@ -303,6 +310,30 @@ namespace Nethermind.Network.Test
             }
 
             return p2pSession;
+        }
+
+        private void AssertTrue(Func<bool> check, int timeout)
+        {
+            var checkThreshold = 200;
+            if (timeout < checkThreshold)
+            {
+                Assert.IsTrue(check.Invoke());
+                return;
+            }
+
+            var waitTime = checkThreshold;
+            while (waitTime < timeout)
+            {
+                if (check.Invoke())
+                {
+                    return;
+                }
+
+                waitTime = waitTime + checkThreshold;
+                var task = Task.Delay(checkThreshold);
+                task.Wait();
+            }
+            Assert.IsTrue(check.Invoke());
         }
     }
 
@@ -332,11 +363,15 @@ namespace Nethermind.Network.Test
         public void TriggerProtocolInitialized(ProtocolInitializedEventArgs eventArgs)
         {
             ProtocolInitialized?.Invoke(this, eventArgs);
+            //var task = Task.Delay(1000);
+            //task.Wait();
         }
 
         public void TriggerPeerDisconnected()
         {
             PeerDisconnected?.Invoke(this, new DisconnectEventArgs(DisconnectReason.TooManyPeers, DisconnectType.Local));
+            //var task = Task.Delay(1000);
+            //task.Wait();
         }
 
         public void DeliverMessage(Packet packet, bool priority = false)
@@ -362,6 +397,8 @@ namespace Nethermind.Network.Test
         public void Handshake()
         {
             HandshakeComplete?.Invoke(this, EventArgs.Empty);
+            var task = Task.Delay(1000);
+            task.Wait();
         }
 
         public event EventHandler<DisconnectEventArgs> PeerDisconnected;
@@ -371,11 +408,15 @@ namespace Nethermind.Network.Test
         public void TriggerPeerDisconnected(DisconnectReason reason, DisconnectType disconnectType)
         {
             PeerDisconnected?.Invoke(this, new DisconnectEventArgs(reason, disconnectType));
+            var task = Task.Delay(1000);
+            task.Wait();
         }
 
         public void TriggerHandshakeComplete()
         {
             HandshakeComplete?.Invoke(this, EventArgs.Empty);
+            var task = Task.Delay(1000);
+            task.Wait();
         }
     }
 

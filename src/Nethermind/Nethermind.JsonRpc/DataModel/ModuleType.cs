@@ -31,6 +31,7 @@ namespace Nethermind.JsonRpc.DataModel
         Web3,
         Db,
         Shh,
-        Nethm
+        Nethm,
+        Debug
     }
 }

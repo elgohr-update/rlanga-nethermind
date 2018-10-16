@@ -53,17 +53,11 @@ namespace Nethermind.Network.Discovery
             //In case of SocketException we log it as debug to avoid noise
             if (exception is SocketException)
             {
-                if (_logger.IsTrace)
-                {
-                    _logger.Trace($"Exception when processing discovery messages (SocketException): {exception}");
-                }
+                if (_logger.IsTrace) _logger.Trace($"Exception when processing discovery messages (SocketException): {exception}");
             }
             else
             {
-                if (_logger.IsError)
-                {
-                    _logger.Error("Exception when processing discovery messages", exception);
-                }
+                if (_logger.IsError) _logger.Error("Exception when processing discovery messages", exception);
             }
 
             base.ExceptionCaught(context, exception);
@@ -114,10 +108,11 @@ namespace Nethermind.Network.Discovery
                 _logger.Error($"Incorrect message, length: {msg.Length}, sender: {address}");
                 return;
             }
+            
             var typeRaw = msg[97];
             if (!Enum.IsDefined(typeof(MessageType), (int)typeRaw))
             {
-                _logger.Error($"Unsupported message type: {typeRaw}, sender: {address}");
+                if(_logger.IsDebug) _logger.Debug($"Unsupported message type: {typeRaw}, sender: {address}, message {msg.ToHexString()}");
                 return;
             }
             

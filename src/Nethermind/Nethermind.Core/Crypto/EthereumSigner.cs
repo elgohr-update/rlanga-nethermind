@@ -21,6 +21,7 @@ using System.Numerics;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
+using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Core.Crypto
 {
@@ -37,14 +38,14 @@ namespace Nethermind.Core.Crypto
         private readonly ISpecProvider _specProvider;
         private readonly ILogger _logger;
 
-        public EthereumSigner(ISpecProvider specProviderProvider, ILogManager logManager)
+        public EthereumSigner(ISpecProvider specProvider, ILogManager logManager)
         {
-            _specProvider = specProviderProvider;
+            _specProvider = specProvider;
             _logger = logManager.GetClassLogger();
-            _chainIdValue = specProviderProvider.ChainId;
+            _chainIdValue = specProvider.ChainId;
         }
         
-        public void Sign(PrivateKey privateKey, Transaction transaction, BigInteger blockNumber)
+        public void Sign(PrivateKey privateKey, Transaction transaction, UInt256 blockNumber)
         {
             _logger?.Debug($"Signing transaction: {transaction.Value} to {transaction.To}");
             bool isEip155Enabled = _specProvider.GetSpec(blockNumber).IsEip155Enabled;
@@ -60,13 +61,14 @@ namespace Nethermind.Core.Crypto
 
         public void RecoverAddresses(Block block)
         {
-            foreach (Transaction transaction in block.Transactions)
+            for (int i = 0; i < block.Transactions.Length; i++)
             {
-                transaction.SenderAddress = RecoverAddress(transaction, block.Number);
+                var tx = block.Transactions[i];
+                tx.SenderAddress = RecoverAddress(tx, block.Number);
             }
         }
 
-        public bool Verify(Address sender, Transaction transaction, BigInteger blockNumber)
+        public bool Verify(Address sender, Transaction transaction, UInt256 blockNumber)
         {
             bool isEip155Enabled = _specProvider.GetSpec(blockNumber).IsEip155Enabled;
             Keccak hash = Keccak.Compute(Rlp.Encode(transaction, true, isEip155Enabled, _chainIdValue));
@@ -74,7 +76,7 @@ namespace Nethermind.Core.Crypto
             return recovered.Equals(sender);
         }
 
-        public Address RecoverAddress(Transaction transaction, BigInteger blockNumber)
+        public Address RecoverAddress(Transaction transaction, UInt256 blockNumber)
         {
             bool isEip155Enabled = _specProvider.GetSpec(blockNumber).IsEip155Enabled;
             bool applyEip155 = isEip155Enabled && (transaction.Signature.V == _chainIdValue * 2 + 35 || transaction.Signature.V == _chainIdValue * 2 + 36);  

@@ -17,7 +17,6 @@
  */
 
 using Nethermind.Core;
-using Nethermind.Core.Crypto;
 
 namespace Nethermind.Store
 {
@@ -29,10 +28,10 @@ namespace Nethermind.Store
 
         void Set(StorageAddress storageAddress, byte[] newValue);
 
-        Keccak GetRoot(Address address);
+        void Reset();
         
-        void ClearCaches(); // TODO: temp while designing DB <-> store interaction
-
+        void Destroy(Address address);
+        
         void CommitTrees();
     }
 }

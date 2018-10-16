@@ -16,18 +16,15 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Core;
-
 namespace Nethermind.Runner.Config
 {
     public class InitConfig : IInitConfig
     {
-        public bool TransactionTracingEnabled { get; set; } = false;
-        public string BaseTracingPath { get; set; } = "traces";
-        public bool JsonRpcEnabled { get; set; } = true;
+        public bool JsonRpcEnabled { get; set; } = false;
         public bool DiscoveryEnabled { get; set; } = true;
         public bool SynchronizationEnabled { get; set; } = true;
         public bool NetworkEnabled { get; set; } = true;
+        public bool PeerManagerEnabled { get; set; } = true;
         public bool IsMining { get; set; } = false;
         public int FakeMiningDelay { get; set; } = 12000;
         public string HttpHost { get; set; } = "127.0.0.1";
@@ -36,11 +33,11 @@ namespace Nethermind.Runner.Config
         public int P2PPort { get; set; } = 30312;
         public string ChainSpecPath { get; set; }
         public string BaseDbPath { get; set; } = "db";
-        public string TestNodeKey { get; set; } = "020102030405060708090a0b0c0d0e0f000102030405060708090a0b0c0d0e0f";
+        public string TestNodeKey { get; set; }
         public string LogFileName { get; set; } = "log.txt";
         public string GenesisHash { get; set; }
-        public string[] JsonRpcEnabledModules { get; set; } = { "Eth", "Net", "Web3", "Db", "Shh" };
-        public bool RemovingLogFilesEnabled { get; set; } = true;
+        public string[] JsonRpcEnabledModules { get; set; } = { "Eth", "Net", "Web3", "Db", "Shh", "Nethm", "Debug" };
+        public bool RemovingLogFilesEnabled { get; set; }
         //in case of null, the path is set to ExecutingAssembly.Location\logs
         public string LogDirectory { get; set; } = null;
         public bool LogPerfStatsOnDebug { get; set; } = false;

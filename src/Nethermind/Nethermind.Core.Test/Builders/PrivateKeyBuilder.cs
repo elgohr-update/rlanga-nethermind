@@ -22,11 +22,11 @@ namespace Nethermind.Core.Test.Builders
 {
     public class PrivateKeyBuilder : BuilderBase<PrivateKey>
     {
-        private static readonly ICryptoRandom CryptoRandom = new CryptoRandom();
-
+        private PrivateKeyGenerator _generator = new PrivateKeyGenerator();
+        
         public PrivateKeyBuilder()
         {
-            TestObject = new PrivateKeyProvider(CryptoRandom).PrivateKey;
+            TestObject = _generator.Generate();
         }
     }
 }

@@ -20,6 +20,7 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
+using Nethermind.Dirichlet.Numerics;
 using NUnit.Framework;
 
 namespace Nethermind.Core.Test
@@ -94,7 +95,9 @@ namespace Nethermind.Core.Test
             Address addressB = new Address(Keccak.Compute("b"));
             Assert.True(addressA == addressA2);
             // ReSharper disable once EqualExpressionComparison
+#pragma warning disable CS1718
             Assert.True(addressA == addressA);
+#pragma warning restore CS1718
             Assert.False(addressA == addressB);
             Assert.False(addressA == null);
             Assert.False(null == addressA);
@@ -109,7 +112,9 @@ namespace Nethermind.Core.Test
             Address addressB = new Address(Keccak.Compute("b"));
             Assert.False(addressA != addressA2);
             // ReSharper disable once EqualExpressionComparison
+#pragma warning disable CS1718
             Assert.False(addressA != addressA);
+#pragma warning restore CS1718
             Assert.True(addressA != addressB);
             Assert.True(addressA != null);
             Assert.True(null != addressA);
@@ -174,7 +179,7 @@ namespace Nethermind.Core.Test
         [TestCase(1, "0xdc98b4d0af603b4fb5ccdd840406a0210e5deff8")]
         public void Of_contract(long nonce, string expectedAddress)
         {
-            Address address = Address.OfContract(TestObject.AddressA, nonce);
+            Address address = Address.OfContract(TestObject.AddressA, (UInt256)nonce);
             Assert.AreEqual(address, new Address(expectedAddress));
         }
     }

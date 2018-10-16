@@ -24,5 +24,6 @@
       <Name>Nethermind.KeyStore</Name>
     </ProjectReference>
     <ProjectReference Include="..\Nethermind.Solc\Nethermind.Solc.csproj" />
+    <ProjectReference Include="..\Nethermind.Wallet\Nethermind.Wallet.csproj" />
   </ItemGroup>
 </Project>

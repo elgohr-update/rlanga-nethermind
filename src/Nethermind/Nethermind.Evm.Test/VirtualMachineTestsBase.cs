@@ -1,4 +1,22 @@
-﻿using System;
+﻿/*
+ * Copyright (c) 2018 Demerzel Solutions Limited
+ * This file is part of the Nethermind library.
+ *
+ * The Nethermind library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * The Nethermind library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Nethermind.Core;
@@ -10,17 +28,14 @@ using Nethermind.Core.Test.Builders;
 using Nethermind.Dirichlet.Numerics;
 using Nethermind.Store;
 using NUnit.Framework;
-using Org.BouncyCastle.Utilities.Encoders;
 
 namespace Nethermind.Evm.Test
 {
-    public class VirtualMachineTestsBase : ITransactionTracer
+    public class VirtualMachineTestsBase
     {
-        private readonly ConsoleTransactionTracer _tracer = new ConsoleTransactionTracer(new UnforgivingJsonSerializer());
         private readonly IEthereumSigner _ethereumSigner;
         private readonly ITransactionProcessor _processor;
         private readonly ISnapshotableDb _stateDb;
-        private readonly IDbProvider _storageDbProvider;
         protected internal readonly ISpecProvider SpecProvider;
         protected internal IStateProvider TestState { get; }
         protected internal IStorageProvider Storage { get; }
@@ -28,73 +43,67 @@ namespace Nethermind.Evm.Test
         protected internal static Address Sender { get; } = TestObject.AddressA;
         protected internal static Address Recipient { get; } = TestObject.AddressB;
 
-        protected virtual UInt256 BlockNumber => 10000;
+        protected virtual UInt256 BlockNumber => MainNetSpecProvider.ByzantiumBlockNumber;
 
         protected IReleaseSpec Spec => SpecProvider.GetSpec(BlockNumber);
 
         public VirtualMachineTestsBase()
         {
-            SpecProvider = RopstenSpecProvider.Instance;
+            SpecProvider = MainNetSpecProvider.Instance;
             ILogManager logger = NullLogManager.Instance;
-            IDb codeDb = new MemDb();
-            _stateDb = new SnapshotableDb(new MemDb());
+            IDb codeDb = new StateDb();
+            _stateDb = new StateDb();
             StateTree stateTree = new StateTree(_stateDb);
             TestState = new StateProvider(stateTree, codeDb, logger);
-            _storageDbProvider = new MemDbProvider(logger);
-            Storage = new StorageProvider(_storageDbProvider, TestState, logger);
+            Storage = new StorageProvider(_stateDb, TestState, logger);
             _ethereumSigner = new EthereumSigner(SpecProvider, logger);
             IBlockhashProvider blockhashProvider = new TestBlockhashProvider();
             IVirtualMachine virtualMachine = new VirtualMachine(TestState, Storage, blockhashProvider, logger);
 
-            _processor = new TransactionProcessor(SpecProvider, TestState, Storage, virtualMachine, this, logger);
-        }
-
-        protected TransactionTrace TransactionTrace { get; private set; }
-
-        public bool IsTracingEnabled
-        {
-            get => _tracer.IsTracingEnabled;
-            protected set => _tracer.IsTracingEnabled = value;
-        }
-
-        public void SaveTrace(Keccak hash, TransactionTrace trace)
-        {
-            TransactionTrace = trace;
-            _tracer.SaveTrace(hash, trace);
+            _processor = new TransactionProcessor(SpecProvider, TestState, Storage, virtualMachine, logger);
         }
 
         [SetUp]
-        public void Setup()
+        public virtual void Setup()
         {
-            _tracer.IsTracingEnabled = false;
-            TransactionTrace = null;
-
             _stateDbSnapshot = _stateDb.TakeSnapshot();
-            _storageDbSnapshot = _storageDbProvider.TakeSnapshot();
             _stateRoot = TestState.StateRoot;
         }
 
         private int _stateDbSnapshot;
-        private int _storageDbSnapshot;
         private Keccak _stateRoot;
 
         [TearDown]
         public void TearDown()
         {
-            Storage.ClearCaches();
+            Storage.Reset();
             TestState.Reset();
             TestState.StateRoot = _stateRoot;
 
-            _storageDbProvider.Restore(_storageDbSnapshot);
             _stateDb.Restore(_stateDbSnapshot);
         }
 
+        protected (TransactionReceipt Receipt, TransactionTrace Trace) ExecuteAndTrace(params byte[] code)
+        {
+            return Execute(BlockNumber, 100000, code, true);
+        }
+        
+        protected (TransactionReceipt Receipt, TransactionTrace Trace) ExecuteAndTrace(UInt256 blockNumber, long gasLimit, params byte[] code)
+        {
+            return Execute(blockNumber, gasLimit, code, true);
+        }
+        
         protected TransactionReceipt Execute(params byte[] code)
         {
-            return Execute(BlockNumber, 100000, code);
+            return Execute(BlockNumber, 100000, code, false).Receipt;
         }
 
         protected TransactionReceipt Execute(UInt256 blockNumber, long gasLimit, byte[] code)
+        {
+            return Execute(blockNumber, gasLimit, code, false).Receipt;
+        }
+        
+        private (TransactionReceipt Receipt, TransactionTrace Trace) Execute(UInt256 blockNumber, long gasLimit, byte[] code, bool shouldTrace)
         {
             TestState.CreateAccount(Sender, 100.Ether());
             TestState.CreateAccount(Recipient, 100.Ether());
@@ -111,8 +120,7 @@ namespace Nethermind.Evm.Test
                 .TestObject;
 
             Block block = Build.A.Block.WithNumber(blockNumber).TestObject;
-            TransactionReceipt receipt = _processor.Execute(transaction, block.Header);
-            return receipt;
+            return _processor.Execute(0, transaction, block.Header, shouldTrace);
         }
 
         protected void AssertGas(TransactionReceipt receipt, long gas)
@@ -175,14 +183,7 @@ namespace Nethermind.Evm.Test
             
             public Prepare ForInitOf(byte[] codeToBeDeployed)
             {
-                if (codeToBeDeployed.Length > 32)
-                {
-                    throw new NotSupportedException();
-                }
-                
-                PushData(codeToBeDeployed.PadRight(32));
-                PushData(0);
-                Op(Instruction.MSTORE);
+                StoreDataInMemory(0, codeToBeDeployed.PadRight(32));
                 PushData(codeToBeDeployed.Length);
                 PushData(0);
                 Op(Instruction.RETURN);

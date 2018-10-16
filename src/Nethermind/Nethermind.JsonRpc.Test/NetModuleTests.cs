@@ -20,6 +20,7 @@ using Nethermind.Config;
 using Nethermind.Core;
 using Nethermind.Core.Logging;
 using Nethermind.JsonRpc.Module;
+using NSubstitute;
 using NUnit.Framework;
 
 namespace Nethermind.JsonRpc.Test
@@ -32,14 +33,14 @@ namespace Nethermind.JsonRpc.Test
         [SetUp]
         public void Initialize()
         {
-            _netModule = new NetModule(new JsonConfigProvider(), NullLogManager.Instance);
+            _netModule = new NetModule(new JsonConfigProvider(), NullLogManager.Instance, new JsonSerializer(NullLogManager.Instance), Substitute.For<IBlockchainBridge>());
         }
 
         [Test]
         public void NetVersionSuccessTest()
         {
             var result = _netModule.net_version();
-            Assert.AreEqual(result.Data, "1");
+            Assert.AreEqual(result.Data, "0");
         }
     }
 }

@@ -27,11 +27,11 @@ namespace Nethermind.Db
 {
     public class DbOnTheRocks : IDb
     {
-        public const string StorageDbPath = "state";
         public const string StateDbPath = "state";
         public const string CodeDbPath = "code";
         public const string BlocksDbPath = "blocks";
         public const string ReceiptsDbPath = "receipts";
+        public const string TxsDbPath = "txs";
         public const string BlockInfosDbPath = "blockInfos";
 
         private static readonly ConcurrentDictionary<string, RocksDb> DbsByPath = new ConcurrentDictionary<string, RocksDb>();
@@ -128,9 +128,6 @@ namespace Nethermind.Db
                     case DbInstance.State:
                         Metrics.StateDbReads++;
                         break;
-                    case DbInstance.Storage:
-                        Metrics.StorageDbReads++;
-                        break;
                     case DbInstance.BlockInfo:
                         Metrics.BlockInfosDbReads++;
                         break;
@@ -164,9 +161,6 @@ namespace Nethermind.Db
                 {
                     case DbInstance.State:
                         Metrics.StateDbWrites++;
-                        break;
-                    case DbInstance.Storage:
-                        Metrics.StorageDbWrites++;
                         break;
                     case DbInstance.BlockInfo:
                         Metrics.BlockInfosDbWrites++;
@@ -232,11 +226,11 @@ namespace Nethermind.Db
         private enum DbInstance
         {
             State,
-            Storage,
             BlockInfo,
             Block,
             Code,
             Receipts,
+            Tx,
             Other
         }
 

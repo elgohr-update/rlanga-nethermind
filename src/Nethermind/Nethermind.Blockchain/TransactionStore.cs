@@ -21,61 +21,47 @@ using System.Collections.Concurrent;
 using System.Linq;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
+using Nethermind.Core.Encoding;
+using Nethermind.Core.Specs;
+using Nethermind.Dirichlet.Numerics;
+using Nethermind.Store;
 
 namespace Nethermind.Blockchain
 {
     public class TransactionStore : ITransactionStore
     {
+        private readonly IDb _receiptsDb;
+        private readonly ISpecProvider _specProvider;
         private readonly ConcurrentDictionary<Keccak, Transaction> _pending = new ConcurrentDictionary<Keccak, Transaction>();
-        private readonly ConcurrentDictionary<Keccak, Transaction> _transactions = new ConcurrentDictionary<Keccak, Transaction>();
-        private readonly ConcurrentDictionary<Keccak, TransactionReceipt> _transactionRecepits = new ConcurrentDictionary<Keccak, TransactionReceipt>();
-        private readonly ConcurrentBag<Keccak> _processedTransactions = new ConcurrentBag<Keccak>();
-        private readonly ConcurrentDictionary<Keccak, Keccak> _blockHashes = new ConcurrentDictionary<Keccak, Keccak>();
 
-        public void AddTransaction(Transaction transaction)
+        public TransactionStore(IDb receiptsDb, ISpecProvider specProvider)
         {
-            if (transaction.Hash == null)
+            _receiptsDb = receiptsDb;            
+            _specProvider = specProvider;
+        }
+        
+        public void StoreProcessedTransaction(Keccak txHash, TransactionReceipt receipt)
+        {
+            if(receipt == null) throw new ArgumentNullException(nameof(receipt));
+            
+            IReleaseSpec spec = _specProvider.GetSpec(receipt.BlockNumber);
+            _receiptsDb.Set(txHash, Rlp.Encode(receipt, spec.IsEip658Enabled ? RlpBehaviors.Eip658Receipts | RlpBehaviors.Storage: RlpBehaviors.Storage).Bytes);
+        }
+
+        public TransactionReceipt GetReceipt(Keccak txHash)
+        {
+            byte[] receiptData = _receiptsDb.Get(txHash);
+            if (receiptData == null)
             {
-                throw new InvalidOperationException("Transaction hash is null when adding to the store.");
+                return null;
             }
-
-            _transactions[transaction.Hash] = transaction;
-        }
-
-        public void AddTransactionReceipt(Keccak transactionHash, TransactionReceipt transactionReceipt, Keccak blockHash)
-        {
-            _transactionRecepits[transactionHash] = transactionReceipt;
-            _blockHashes[transactionHash] = blockHash;
-            _processedTransactions.Add(transactionHash);
-        }
-
-        public Transaction GetTransaction(Keccak transactionHash)
-        {
-            return _transactions.TryGetValue(transactionHash, out var transaction) ? transaction : null;
-        }
-
-        public TransactionReceipt GetTransactionReceipt(Keccak transactionHash)
-        {
-            return _transactionRecepits.TryGetValue(transactionHash, out var transaction) ? transaction : null;
-        }
-
-        public bool WasProcessed(Keccak transactionHash)
-        {
-            return _processedTransactions.Contains(transactionHash);
-        }
-
-        public Keccak GetBlockHash(Keccak transactionHash)
-        {
-            return _blockHashes.TryGetValue(transactionHash, out var blockHash) ? blockHash : null;
+            
+            Rlp rlp = new Rlp(receiptData);
+            return Rlp.Decode<TransactionReceipt>(rlp, RlpBehaviors.Storage);
         }
 
         public AddTransactionResult AddPending(Transaction transaction)
         {
-            if (_processedTransactions.Contains(transaction.Hash))
-            {
-                return AddTransactionResult.AlreadyProcessed;
-            }
-
             if (_pending.ContainsKey(transaction.Hash))
             {
                 return AddTransactionResult.AlreadyKnown;

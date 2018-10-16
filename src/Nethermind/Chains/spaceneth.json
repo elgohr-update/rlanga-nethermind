@@ -1,0 +1,49 @@
+{
+	"name": "Spaceneth",
+	"dataDir": "spaceneth",
+	"params": {
+		"gasLimitBoundDivisor": "0x0400",
+		"accountStartNonce": "0x0",
+		"maximumExtraDataSize": "0x20",
+		"minGasLimit": "0x1388",
+		"networkID" : "0x63"
+	},
+	"genesis": {
+		"seal": {
+			"ethereum": {
+				"nonce": "0x0000000000000042",
+				"mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000"
+			}
+		},
+		"difficulty": "0x01",
+		"author": "0x0000000000000000000000000000000000000000",
+		"timestamp": "0x00",
+		"parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"extraData": "0x0000000000000000000000000000000000000000000000000000000000000000",
+		"gasLimit": "0x1000000"
+	},
+	"nodes": [
+	],
+	"accounts": {
+		"0000000000000000000000000000000000000000": { "balance": "1" },
+		"0000000000000000000000000000000000000001": { "balance": "1", "nonce": "0", "builtin": { "name": "ecrecover", "pricing": { "linear": { "base": 3000, "word": 0 } } } },
+		"0000000000000000000000000000000000000002": { "balance": "1", "nonce": "0", "builtin": { "name": "sha256", "pricing": { "linear": { "base": 60, "word": 12 } } } },
+		"0000000000000000000000000000000000000003": { "balance": "1", "nonce": "0", "builtin": { "name": "ripemd160", "pricing": { "linear": { "base": 600, "word": 120 } } } },
+		"0000000000000000000000000000000000000004": { "balance": "1", "nonce": "0", "builtin": { "name": "identity", "pricing": { "linear": { "base": 15, "word": 3 } } } },
+		"0000000000000000000000000000000000000005": { "balance": "1", "nonce": "0", "builtin": { "name": "modexp", "activate_at": 1700000, "pricing": { "modexp": { "divisor": 20 } } } },
+		"0000000000000000000000000000000000000006": { "balance": "1", "nonce": "0", "builtin": { "name": "alt_bn128_add", "activate_at": 1700000, "pricing": { "linear": { "base": 500, "word": 0 } } } },
+		"0000000000000000000000000000000000000007": { "balance": "1", "nonce": "0", "builtin": { "name": "alt_bn128_mul", "activate_at": 1700000, "pricing": { "linear": { "base": 40000, "word": 0 } } } },
+		"0000000000000000000000000000000000000008": { "balance": "1", "nonce": "0", "builtin": { "name": "alt_bn128_pairing", "activate_at": 1700000, "pricing": { "alt_bn128_pairing": { "base": 100000, "pair": 80000 } } } },
+		"0000000000000000000000000000000000000009": { "balance": "1" },
+		"7e5f4552091a69125d5dfcb7b8c2659029395bdf": { "balance": "1000000000000000000000000" },
+		"7691ee0343b9a529675e1a8a70197b3b704f90b7": { "balance": "1000000000000000000000000" },
+		"e87e14094cae966ec09104e24528e91b19368fd7": { "balance": "1000000000000000000000000" },
+		"006058773310c7b2ab63feb5e24302e4d95417e8": { "balance": "1000000000000000000000000" },
+		"d54f581aee5ad5d3e77d9a087d45291ca885dcd4": { "balance": "1000000000000000000000000" },
+		"3e3fbf6d4829c4b91b085094c6c06b3a072cbf29": { "balance": "1000000000000000000000000" },
+		"10828d4d40ecd9f7ae4697e7d333e37457148dd8": { "balance": "1000000000000000000000000" },
+		"a315c0d8561afe9d64793df8d294cc37f04bdbc2": { "balance": "1000000000000000000000000" },
+		"efdd5dc815999814dc61e64cf8ab4fb06fce5380": { "balance": "1000000000000000000000000" },
+		"dffba406fcbe09cb30c723bf0f21ab8f07118e9e": { "balance": "1000000000000000000000000" }
+	}
+}

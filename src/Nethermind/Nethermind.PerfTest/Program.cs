@@ -25,7 +25,6 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Blockchain;
-using Nethermind.Blockchain.Difficulty;
 using Nethermind.Blockchain.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
@@ -38,6 +37,7 @@ using Nethermind.Db.Config;
 using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm;
 using Nethermind.Mining;
+using Nethermind.Mining.Difficulty;
 using Nethermind.Store;
 
 namespace Nethermind.PerfTest
@@ -148,11 +148,11 @@ namespace Nethermind.PerfTest
         private static void RunVmPerfTests()
         {
             ILogManager logManager = NullLogManager.Instance;
-            MemDbProvider memDbProvider = new MemDbProvider(logManager);
-            StateTree stateTree = new StateTree(memDbProvider.GetOrCreateStateDb());
-            IStateProvider stateProvider = new StateProvider(stateTree, memDbProvider.GetOrCreateCodeDb(), logManager);
-            IBlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), new MemDb(), FrontierSpecProvider.Instance, logManager);
-            _machine = new VirtualMachine(stateProvider, new StorageProvider(memDbProvider, stateProvider, logManager), new BlockhashProvider(blockTree), logManager);
+            ISnapshotableDb stateDb = new StateDb();
+            StateTree stateTree = new StateTree(stateDb);
+            IStateProvider stateProvider = new StateProvider(stateTree, new StateDb(), logManager);
+            IBlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), FrontierSpecProvider.Instance, new TransactionStore(new MemDb(), RopstenSpecProvider.Instance), logManager);
+            _machine = new VirtualMachine(stateProvider, new StorageProvider(stateDb, stateProvider, logManager), new BlockhashProvider(blockTree), logManager);
 
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
@@ -263,7 +263,7 @@ namespace Nethermind.PerfTest
                 //return _processed.ContainsKey(blockHash) && _blockTree.WasProcessed(blockHash); // to mimic the reads at least
             }
 
-            public void MarkAsProcessed(Keccak blockHash, TransactionReceipt[] receipts = null)
+            public void MarkAsProcessed(Keccak blockHash)
             {
                 //const byte ignored = 1;
                 //_processed.TryAdd(blockHash, ignored);
@@ -283,7 +283,6 @@ namespace Nethermind.PerfTest
         }
 
         private static readonly string FullStateDbPath = Path.Combine(DbBasePath, DbOnTheRocks.StateDbPath);
-        private static readonly string FullStorageDbPath = Path.Combine(DbBasePath, DbOnTheRocks.StorageDbPath);
         private static readonly string FullCodeDbPath = Path.Combine(DbBasePath, DbOnTheRocks.CodeDbPath);
         private static readonly string FullReceiptsDbPath = Path.Combine(DbBasePath, DbOnTheRocks.ReceiptsDbPath);
 
@@ -301,44 +300,46 @@ namespace Nethermind.PerfTest
             if (_logger.IsInfo) _logger.Info("Deleting state DBs");
 
             DeleteDb(FullStateDbPath);
-            DeleteDb(FullStorageDbPath);
             DeleteDb(FullCodeDbPath);
             DeleteDb(FullReceiptsDbPath);
             if (_logger.IsInfo) _logger.Info("State DBs deleted");
 
             /* spec */
-            var sealEngine = new EthashSealEngine(new Ethash(_logManager), _logManager);
+            
             var specProvider = RopstenSpecProvider.Instance;
-
-            var blocksDb = new DbOnTheRocks(FullBlocksDbPath, DbConfig.Default);
-            var blockInfosDb = new DbOnTheRocks(FullBlockInfosDbPath, DbConfig.Default);
-            var receiptsDb = new DbOnTheRocks(FullReceiptsDbPath, DbConfig.Default);
+            var difficultyCalculator = new DifficultyCalculator(specProvider);
+            var sealEngine = new EthashSealEngine(new Ethash(_logManager), difficultyCalculator, _logManager);
+            
+            var dbProvider = new RocksDbProvider(DbBasePath, DbConfig.Default);
+            var stateDb = dbProvider.StateDb;
+            var codeDb = dbProvider.CodeDb;
+            var blocksDb = dbProvider.BlocksDb;
+            var blockInfosDb = dbProvider.BlockInfosDb;
+            var receiptsDb = dbProvider.ReceiptsDb;
 
             /* store & validation */
-            var blockTree = new UnprocessedBlockTreeWrapper(new BlockTree(blocksDb, blockInfosDb, receiptsDb, specProvider, _logManager));
-            var difficultyCalculator = new DifficultyCalculator(specProvider);
-            var headerValidator = new HeaderValidator(difficultyCalculator, blockTree, sealEngine, specProvider, _logManager);
+            var blockTree = new UnprocessedBlockTreeWrapper(new BlockTree(blocksDb, blockInfosDb, specProvider, new TransactionStore(new MemDb(), RopstenSpecProvider.Instance), _logManager));
+            var headerValidator = new HeaderValidator(blockTree, sealEngine, specProvider, _logManager);
             var ommersValidator = new OmmersValidator(blockTree, headerValidator, _logManager);
             var transactionValidator = new TransactionValidator(new SignatureValidator(ChainId.Ropsten));
             var blockValidator = new BlockValidator(transactionValidator, headerValidator, ommersValidator, specProvider, _logManager);
 
             /* state & storage */
 
-            var dbProvider = new RocksDbProvider(DbBasePath, _logManager, DbConfig.Default);
-            var stateTree = new StateTree(dbProvider.GetOrCreateStateDb());
-            var stateProvider = new StateProvider(stateTree, dbProvider.GetOrCreateCodeDb(), _logManager);
-            var storageProvider = new StorageProvider(dbProvider, stateProvider, _logManager);
+            var stateTree = new StateTree(stateDb);
+            var stateProvider = new StateProvider(stateTree, codeDb, _logManager);
+            var storageProvider = new StorageProvider(stateDb, stateProvider, _logManager);
 
             /* blockchain processing */
             var ethereumSigner = new EthereumSigner(specProvider, _logManager);
-            var transactionStore = new TransactionStore();
+            var transactionStore = new TransactionStore(receiptsDb, specProvider);
             var blockhashProvider = new BlockhashProvider(blockTree);
             var virtualMachine = new VirtualMachine(stateProvider, storageProvider, blockhashProvider, _logManager);
             //var processor = new TransactionProcessor(specProvider, stateProvider, storageProvider, virtualMachine, new TransactionTracer("D:\\tx_traces\\perf_test", new UnforgivingJsonSerializer()), _logManager);
-            var processor = new TransactionProcessor(specProvider, stateProvider, storageProvider, virtualMachine, NullTracer.Instance, _logManager);
+            var processor = new TransactionProcessor(specProvider, stateProvider, storageProvider, virtualMachine, _logManager);
             var rewardCalculator = new RewardCalculator(specProvider);
-            var blockProcessor = new BlockProcessor(specProvider, blockValidator, rewardCalculator, processor, dbProvider, stateProvider, storageProvider, transactionStore, _logManager);
-            var blockchainProcessor = new BlockchainProcessor(blockTree, sealEngine, transactionStore, difficultyCalculator, blockProcessor, ethereumSigner, _logManager, new PerfService(_logManager));
+            var blockProcessor = new BlockProcessor(specProvider, blockValidator, rewardCalculator, processor, stateDb, codeDb, stateProvider, storageProvider, transactionStore, _logManager);
+            var blockchainProcessor = new BlockchainProcessor(blockTree, blockProcessor, ethereumSigner, _logManager);
 
             /* load ChainSpec and init */
             ChainSpecLoader loader = new ChainSpecLoader(new UnforgivingJsonSerializer());
@@ -351,7 +352,7 @@ namespace Nethermind.PerfTest
             }
 
             stateProvider.Commit(specProvider.GenesisSpec);
-            chainSpec.Genesis.Header.StateRoot = stateProvider.StateRoot; // TODO: shall it be HeaderSpec and not BlockHeader?
+            chainSpec.Genesis.Header.StateRoot = stateProvider.StateRoot;
             chainSpec.Genesis.Header.Hash = BlockHeader.CalculateHash(chainSpec.Genesis.Header);
             if (chainSpec.Genesis.Hash != new Keccak("0x41941023680923e0fe4d74a34bdac8141f2540e3ae90623718e47d66d1ca4a2d"))
             {
@@ -412,6 +413,7 @@ namespace Nethermind.PerfTest
                     _logger.Warn($"TOTAL after {number} receipts DB writes   : {Metrics.ReceiptsDbWrites}");
                     _logger.Warn($"TOTAL after {number} other DB reads       : {Metrics.OtherDbReads}");
                     _logger.Warn($"TOTAL after {number} other DB writes      : {Metrics.OtherDbWrites}");
+                    _logger.Warn($"TOTAL after {number} empty account saves  : {Metrics.EmptyAccountSaves}");
 
                     // disk space
                     stopwatch.Start();
@@ -425,7 +427,7 @@ namespace Nethermind.PerfTest
             {
                 if (!isStarted)
                 {
-                    blockchainProcessor.Process(blockTree.FindBlock(blockTree.Genesis.Hash, true));
+                    blockchainProcessor.Process(blockTree.FindBlock(blockTree.Genesis.Hash, true), ProcessingOptions.None, NullTraceListener.Instance);
                     stopwatch.Start();
                     blockchainProcessor.Start();
                     isStarted = true;
@@ -468,7 +470,7 @@ namespace Nethermind.PerfTest
             stopwatch.Start();
             for (int i = 0; i < iterations; i++)
             {
-                _machine.Run(new EvmState(1_000_000_000L, env, ExecutionType.Transaction, false), Olympic.Instance, null);
+                _machine.Run(new EvmState(1_000_000_000L, env, ExecutionType.Transaction, false), Olympic.Instance, false);
             }
 
             stopwatch.Stop();

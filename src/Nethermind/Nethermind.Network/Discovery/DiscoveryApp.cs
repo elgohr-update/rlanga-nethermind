@@ -20,6 +20,8 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using DotNetty.Handlers.Logging;
@@ -36,6 +38,7 @@ using Nethermind.Network.Config;
 using Nethermind.Network.Discovery.Lifecycle;
 using Nethermind.Network.Discovery.RoutingTable;
 using Nethermind.Stats;
+using Nethermind.Stats.Model;
 using Timer = System.Timers.Timer;
 
 namespace Nethermind.Network.Discovery
@@ -88,9 +91,11 @@ namespace Nethermind.Network.Discovery
             _discoveryStorage.StartBatch();
         }
 
+        public event EventHandler<NodeEventArgs> NodeDiscovered;
+        
         public void Initialize(PublicKey masterPublicKey)
         {
-            // TODO: can we do it so we do not have to call initialize on these classes?
+            _discoveryManager.NodeDiscovered += OnNewNodeDiscovered;
             _nodeTable.Initialize(new NodeId(masterPublicKey));
             _nodesLocator.Initialize(_nodeTable.MasterNode);
         }
@@ -132,15 +137,31 @@ namespace Nethermind.Network.Discovery
             _perfService.EndPerfCalc(key, "Close: DiscoveryApp");
         }
 
+        public void AddNodeToDiscovery(Node node)
+        {
+            _discoveryManager.GetNodeLifecycleManager(node);
+        }
+
         private void InitializeUdpChannel()
         {
             if(_logger.IsInfo) _logger.Info($"Starting Discovery UDP Channel: {_configurationProvider.MasterHost}:{_configurationProvider.MasterPort}");
             _group = new MultithreadEventLoopGroup(1);
             var bootstrap = new Bootstrap();
             bootstrap
-                .Group(_group)
-                .Channel<SocketDatagramChannel>()
-                .Handler(new ActionChannelInitializer<IDatagramChannel>(InitializeChannel));
+                .Group(_group);
+
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            {
+                bootstrap
+                    .ChannelFactory(() => new SocketDatagramChannel(AddressFamily.InterNetwork))
+                    .Handler(new ActionChannelInitializer<IDatagramChannel>(InitializeChannel));
+            }
+            else
+            {
+                bootstrap
+                    .Channel<SocketDatagramChannel>()
+                    .Handler(new ActionChannelInitializer<IDatagramChannel>(InitializeChannel));
+            }
 
             _bindingTask = bootstrap.BindAsync(IPAddress.Parse(_configurationProvider.MasterHost), _configurationProvider.MasterPort)
                 .ContinueWith(t => _channel = t.Result);
@@ -201,17 +222,15 @@ namespace Nethermind.Network.Discovery
                     {
                         break;
                     }
-                    
-                    _logger.Warn("Could not communicate with any bootnodes.");
-                    
+
                     //Check if we were able to communicate with any trusted nodes or persisted nodes
                     //if so no need to replay bootstraping, we can start discovery process
-                    if (_discoveryManager.GetNodeLifecycleManagers(x => x.State == NodeLifecycleState.Active).Any())
+                    if (_discoveryManager.GetOrAddNodeLifecycleManagers(x => x.State == NodeLifecycleState.Active).Any())
                     {
                         break;
                     }
                     
-                    _logger.Warn("Could not communicate with any nodes.");
+                    _logger.Warn("Could not communicate with any nodes (bootnodes, trusted nodes, persisted nodes).");
                     await Task.Delay(1000, cancellationToken); 
                 }
 
@@ -268,11 +287,10 @@ namespace Nethermind.Network.Discovery
         {
             if(_logger.IsDebug) _logger.Debug("Starting discovery timer");
             _discoveryTimer = new Timer(_configurationProvider.DiscoveryInterval) {AutoReset = false};
-            _discoveryTimer.Elapsed += async (sender, e) =>
+            _discoveryTimer.Elapsed += (sender, e) =>
             {
                 _discoveryTimer.Enabled = false;
-                await RunDiscoveryAsync(_appShutdownSource.Token);
-                await RunRefreshAsync(_appShutdownSource.Token);
+                RunDiscoveryProcess();
                 _discoveryTimer.Enabled = true;
             };
             _discoveryTimer.Start();
@@ -295,16 +313,10 @@ namespace Nethermind.Network.Discovery
         {
             if(_logger.IsDebug) _logger.Debug("Starting discovery persistance timer");
             _discoveryPersistanceTimer = new Timer(_configurationProvider.DiscoveryPersistanceInterval) {AutoReset = false};
-            _discoveryPersistanceTimer.Elapsed += async (sender, e) =>
+            _discoveryPersistanceTimer.Elapsed += (sender, e) =>
             {
                 _discoveryPersistanceTimer.Enabled = false;
-                await RunDiscoveryCommit().ContinueWith(x =>
-                {
-                    if (x.IsFaulted)
-                    {
-                        if (_logger.IsError) _logger.Error("Error during RunDiscoveryCommit", x.Exception);
-                    }
-                });
+                RunDiscoveryCommit();
                 _discoveryPersistanceTimer.Enabled = true;
             };
             _discoveryPersistanceTimer.Start();
@@ -327,14 +339,21 @@ namespace Nethermind.Network.Discovery
         {
             try
             {
-                if (_discoveryManager != null)
+                if (_discoveryHandler != null)
                 {
                     _discoveryHandler.OnChannelActivated -= OnChannelActivated;
                 }
                 
-                await _bindingTask; // if we are still starting
+                if (_bindingTask != null)
+                {
+                    await _bindingTask; // if we are still starting
+                }
 
                 _logger.Info("Stopping discovery udp channel");
+                if (_channel == null)
+                {
+                    return;
+                }
                 var closeTask = _channel.CloseAsync();
                 if (await Task.WhenAny(closeTask, Task.Delay(_configurationProvider.UdpChannelCloseTimeout)) != closeTask)
                 {
@@ -374,8 +393,6 @@ namespace Nethermind.Network.Discovery
                 }
             }
 
-            // TODO: strange sync - can we just have a timeout within which we expect to be notified about an added active manager?
-            // TODO: Task.WhenAny with delay should do
             //Wait for pong message to come back from Boot nodes
             var maxWaitTime = _configurationProvider.BootNodePongTimeout;
             var itemTime = maxWaitTime / 100;
@@ -391,7 +408,7 @@ namespace Nethermind.Network.Discovery
                     break;
                 }
 
-                if (_discoveryManager.GetNodeLifecycleManagers(x => x.State == NodeLifecycleState.Active).Any())
+                if (_discoveryManager.GetOrAddNodeLifecycleManagers(x => x.State == NodeLifecycleState.Active).Any())
                 {
                     if(_logger.IsTrace) _logger.Trace("Couldnt connect to any of the bootnodes, but succsessfully connected to at least one persisted node.");
                     break;
@@ -401,7 +418,7 @@ namespace Nethermind.Network.Discovery
                 
                 try
                 {
-                    await Task.Delay(itemTime, cancellationToken); // TODO: do we need this?
+                    await Task.Delay(itemTime, cancellationToken);
                 }
                 catch (OperationCanceledException)
                 {
@@ -424,8 +441,24 @@ namespace Nethermind.Network.Discovery
                 }
             }
 
-            if (_logger.IsInfo) _logger.Info($"Connected to {reachedNodeCounter} bootnodes");
+            if (_logger.IsInfo) _logger.Info($"Connected to {reachedNodeCounter} bootnodes, {_discoveryManager.GetOrAddNodeLifecycleManagers(x => x.State == NodeLifecycleState.Active).Count} trusted/persisted nodes");
             return reachedNodeCounter > 0;
+        }
+
+        private void RunDiscoveryProcess()
+        {
+            var task = Task.Run(async () =>
+            {
+                await RunDiscoveryAsync(_appShutdownSource.Token);
+                await RunRefreshAsync(_appShutdownSource.Token);
+            }).ContinueWith(x =>
+            {
+                if (x.IsFaulted && _logger.IsError)
+                {
+                    _logger.Error($"Error during discovery process: {x.Exception}");
+                }
+            });
+            task.Wait();
         }
 
         private async Task RunDiscoveryAsync(CancellationToken cancellationToken)
@@ -441,26 +474,45 @@ namespace Nethermind.Network.Discovery
             await _nodesLocator.LocateNodesAsync(randomId, cancellationToken);
         }
 
-        private async Task RunDiscoveryCommit()
+        private void RunDiscoveryCommit()
         {
-            var managers = _discoveryManager.GetNodeLifecycleManagers();
-            //we need to update all notes to update reputation
-            _discoveryStorage.UpdateNodes(managers.Select(x => new NetworkNode(x.ManagedNode.Id.PublicKey, x.ManagedNode.Host, x.ManagedNode.Port, x.ManagedNode.Description, x.NodeStats.NewPersistedNodeReputation)).ToArray());
-
-            if (!_discoveryStorage.AnyPendingChange())
+            try
             {
-                if (_logger.IsTrace) _logger.Trace("No changes in discovery storage, skipping commit.");
-                return;
+                var managers = _discoveryManager.GetOrAddNodeLifecycleManagers();
+                //we need to update all notes to update reputation
+                _discoveryStorage.UpdateNodes(managers.Select(x => new NetworkNode(x.ManagedNode.Id.PublicKey, x.ManagedNode.Host, x.ManagedNode.Port, x.ManagedNode.Description, x.NodeStats.NewPersistedNodeReputation)).ToArray());
+
+                if (!_discoveryStorage.AnyPendingChange())
+                {
+                    if (_logger.IsTrace) _logger.Trace("No changes in discovery storage, skipping commit.");
+                    return;
+                }
+
+                _storageCommitTask = Task.Run(() =>
+                {
+                    _discoveryStorage.Commit();
+                    _discoveryStorage.StartBatch();
+                });
+
+                var task = _storageCommitTask.ContinueWith(x =>
+                {
+                    if (x.IsFaulted && _logger.IsError)
+                    {
+                        _logger.Error($"Error during discovery commit: {x.Exception}");
+                    }
+                });
+                task.Wait();
+                _storageCommitTask = null;
             }
-
-            _storageCommitTask = Task.Run(() =>
+            catch (Exception ex)
             {
-                _discoveryStorage.Commit();
-                _discoveryStorage.StartBatch();
-            });
-            
-            await _storageCommitTask;
-            _storageCommitTask = null;
+                _logger.Error($"Error during discovery commit: {ex}");
+            }
+        }
+        
+        private void OnNewNodeDiscovered(object sender, NodeEventArgs e)
+        {
+            NodeDiscovered?.Invoke(this, e);
         }
     }
 }

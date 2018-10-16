@@ -34,8 +34,15 @@ namespace Nethermind.Solc
 {
     public static class Proxy
     {
-        private static readonly bool IsWindows;
+        private static readonly OsPlatform Platform;
         private static readonly ReadFileCallback Callback;
+
+        private enum OsPlatform
+        {
+            Windows,
+            Linux,
+            Mac
+        }
         
         private delegate void ReadFileCallback(string _path, ref string o_contents, ref string o_error);
         /* Looks for the solidity file in the given filepath and uses the contents reference to
@@ -72,8 +79,26 @@ namespace Nethermind.Solc
 
         static Proxy()
         {
-            IsWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+            Platform = GetPlatform();
             Callback = CallBack;
+        }
+
+        private static OsPlatform GetPlatform()
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) 
+            {
+                return OsPlatform.Windows;
+            }
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) 
+            {
+                return OsPlatform.Linux;
+            }
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) 
+            {
+                return OsPlatform.Mac;
+            }
+
+            throw new InvalidOperationException("Unsupported platform.");
         }
         
         private static class Win64Lib
@@ -142,33 +167,78 @@ namespace Nethermind.Solc
             public static extern string compileStandard(string _input, ReadFileCallback _readCallback);
         }
 
+        private static class MacLib
+        {
+            [SuppressUnmanagedCodeSecurity]
+            [DllImport("solc.dylib")]
+            public static extern string license();
+            
+            [SuppressUnmanagedCodeSecurity]
+            [DllImport("solc.dylib")]
+            public static extern string version();
+            
+            [SuppressUnmanagedCodeSecurity]
+            [DllImport("solc.dylib")]
+            public static extern string compileJSON(string _input, bool _optimize);
+            
+            [SuppressUnmanagedCodeSecurity]
+            [DllImport("solc.dylib")]
+            public static extern string compileJSONMulti(string _input, bool _optimize);
+            
+            [SuppressUnmanagedCodeSecurity]
+            [DllImport("solc.dylib")]
+            public static extern string compileJSONCallback(string _input, bool _optimize, ReadFileCallback _readCallback);
+            
+            [SuppressUnmanagedCodeSecurity]
+            [DllImport("solc.dylib")]
+            public static extern string compileStandard(string _input, ReadFileCallback _readCallback);
+        }
+
         public static string GetSolcLicense()
         {
-            string result = IsWindows
-                ? Win64Lib.license()
-                : PosixLib.license();
+            switch (Platform)
+            {
+                case OsPlatform.Windows:
+                    return Win64Lib.license();
+                case OsPlatform.Linux:
+                    return PosixLib.license();
+                case OsPlatform.Mac:
+                    return MacLib.license();
+            }
 
-            return result;
+            throw new InvalidOperationException("Unsupported platform.");
         }
 
         public static string GetSolcVersion()
         {
-            string result = IsWindows
-                ? Win64Lib.version()
-                : PosixLib.version();
+            switch (Platform)
+            {
+                case OsPlatform.Windows:
+                    return Win64Lib.version();
+                case OsPlatform.Linux:
+                    return PosixLib.version();
+                case OsPlatform.Mac:
+                    return MacLib.version();
+            }
 
-            return result;
+            throw new InvalidOperationException("Unsupported platform.");          
         }
 
         public static string Compile(string contract, string evmVersion, bool optimize, uint? runs)
         {
             string input = new CompilerInput(contract, evmVersion, optimize, runs).Value();
 
-            string result = IsWindows
-                ? Win64Lib.compileStandard(input, null)
-                : PosixLib.compileStandard(input, null);
+            switch (Platform)
+            {
+                case OsPlatform.Windows:
+                    return Win64Lib.compileStandard(input, null);
+                case OsPlatform.Linux:
+                    return PosixLib.compileStandard(input, null);
+                case OsPlatform.Mac:
+                    return MacLib.compileStandard(input, null);
+            }
 
-            return result;
+            throw new InvalidOperationException("Unsupported platform.");  
         }
     }
 }

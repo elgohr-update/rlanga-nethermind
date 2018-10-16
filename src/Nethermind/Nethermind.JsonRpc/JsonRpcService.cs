@@ -20,10 +20,12 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Nethermind.Config;
 using Nethermind.Core;
+using Nethermind.Core.Extensions;
 using Nethermind.Core.Logging;
 using Nethermind.Core.Model;
 using Nethermind.JsonRpc.Config;
@@ -49,25 +51,30 @@ namespace Nethermind.JsonRpc
         {
             try
             {
-                (ErrorType?, string) validateResult = Validate(rpcRequest);
-                if (validateResult.Item1.HasValue)
+                (ErrorType? errorType, string errorMessage) = Validate(rpcRequest);
+                if (errorType.HasValue)
                 {
-                    return GetErrorResponse(validateResult.Item1.Value, validateResult.Item2, rpcRequest?.Id, rpcRequest?.Method);
+                    return GetErrorResponse(errorType.Value, errorMessage, rpcRequest.Id, rpcRequest?.Method);
                 }
                 try
                 {
                     return ExecuteRequest(rpcRequest);
                 }
+                catch (TargetInvocationException ex)
+                {
+                    _logger.Error($"Error during method execution, request: {rpcRequest}", ex.InnerException);
+                    return GetErrorResponse(ErrorType.InternalError, "Internal error", rpcRequest.Id, rpcRequest?.Method);
+                }
                 catch (Exception ex)
                 {
                     _logger.Error($"Error during method execution, request: {rpcRequest}", ex);
-                    return GetErrorResponse(ErrorType.InternalError, "Internal error", rpcRequest?.Id, rpcRequest?.Method);
+                    return GetErrorResponse(ErrorType.InternalError, "Internal error", rpcRequest.Id, rpcRequest?.Method);
                 }
             }
             catch (Exception ex)
             {
                 _logger.Error($"Error during validation, request: {rpcRequest}", ex);
-                return GetErrorResponse(ErrorType.ParseError, "Incorrect message", null, null);
+                return GetErrorResponse(ErrorType.ParseError, "Incorrect message", 0, null);
             }         
         }
         private JsonRpcResponse ExecuteRequest(JsonRpcRequest rpcRequest)
@@ -110,6 +117,7 @@ namespace Nethermind.JsonRpc
                 _logger.Error($"Method {methodName} execution result does not implement IResultWrapper");
                 return GetErrorResponse(ErrorType.InternalError, "Internal error", request.Id, methodName);
             }
+            
             if (resultWrapper.GetResult() == null || resultWrapper.GetResult().ResultType == ResultType.Failure)
             {
                 _logger.Error($"Error during method: {methodName} execution: {resultWrapper.GetResult()?.Error ?? "no result"}");
@@ -118,23 +126,30 @@ namespace Nethermind.JsonRpc
 
             //process response
             var data = resultWrapper.GetData();
+            if (data is byte[] bytes)
+            {
+                return GetSuccessResponse(bytes.ToHexString(), request.Id);        
+            }
+            
             if (!(data is IEnumerable collection) || data is string)
             {
                 var json = GetDataObject(data);
                 return GetSuccessResponse(json, request.Id);        
             }
+            
             var items = new List<object>();
             foreach (var item in collection)
             {
                 var jsonItem = GetDataObject(item);
                 items.Add(jsonItem);
             }
+            
             return GetSuccessResponse(items, request.Id);
         }
 
         private object GetDataObject(object data)
         {
-            return data is IJsonRpcResult rpcResult ? rpcResult.ToJson() : data.ToString();
+            return data is IJsonRpcResult rpcResult ? rpcResult.ToJson() : data?.ToString();
         }
 
         private object[] GetParameters(ParameterInfo[] expectedParameters, string[] providedParameters)
@@ -168,12 +183,12 @@ namespace Nethermind.JsonRpc
             }
         }
 
-        private JsonRpcResponse GetSuccessResponse(object result, string id)
+        private JsonRpcResponse GetSuccessResponse(object result, BigInteger id)
         {
             var response = new JsonRpcResponse
             {
-                Jsonrpc = _jsonRpcConfig.JsonRpcVersion,
                 Id = id,
+                Jsonrpc = _jsonRpcConfig.JsonRpcVersion,
                 Result = result,
             };
 
@@ -182,13 +197,12 @@ namespace Nethermind.JsonRpc
 
         public JsonRpcResponse GetErrorResponse(ErrorType errorType, string message)
         {
-            return GetErrorResponse(errorType, message, null, null);
+            return GetErrorResponse(errorType, message, 0, null);
         }
         
-        private JsonRpcResponse GetErrorResponse(ErrorType errorType, string message, string id, string methodName)
+        private JsonRpcResponse GetErrorResponse(ErrorType errorType, string message, BigInteger id, string methodName)
         {
-            _logger.Error($"Error during processing the request, method: {methodName ?? "none"}, id: {id ?? "none"}, errorType: {errorType}, message: {message}");
-
+            _logger.Debug($"Sending error response, method: {methodName ?? "none"}, id: {id}, errorType: {errorType}, message: {message}");
             var response = new JsonRpcResponse
             {
                 Jsonrpc = _jsonRpcConfig.JsonRpcVersion,
@@ -199,10 +213,11 @@ namespace Nethermind.JsonRpc
                     Message = message
                 }
             };
+            
             return response;
         }
 
-        private (ErrorType?, string) Validate(JsonRpcRequest rpcRequest)
+        private (ErrorType? ErrorType, string ErrorMessage) Validate(JsonRpcRequest rpcRequest)
         {
             if (rpcRequest == null)
             {
@@ -219,7 +234,7 @@ namespace Nethermind.JsonRpc
             var module = _moduleProvider.GetAllModules().FirstOrDefault(x => x.MethodDictionary.ContainsKey(methodName));
             if (module == null)
             {
-                return (ErrorType.MethodNotFound, "Method is not supported");
+                return (ErrorType.MethodNotFound, $"Method {methodName} is not supported");
             }
 
             if (_moduleProvider.GetEnabledModules().All(x => x.ModuleType != module.ModuleType))

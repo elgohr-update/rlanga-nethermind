@@ -20,7 +20,6 @@ using System;
 using System.Collections.Generic;
 using DotNetty.Codecs;
 using DotNetty.Transport.Channels;
-using Nethermind.Core;
 using Nethermind.Core.Logging;
 using Snappy;
 
@@ -45,14 +44,11 @@ namespace Nethermind.Network.Rlpx
 
             if (message.Data.Length > MaxSnappyLength / 4)
             {
-                if (_logger.IsWarn)
-                {
-                    _logger.Warn($"Big Snappy message of length {message.Data.Length}");
-                }
+                if (_logger.IsWarn) _logger.Warn($"Big Snappy message of length {message.Data.Length}");
             }
-            else if (_logger.IsTrace)
+            else
             {
-                _logger.Trace($"Uncompressing with Snappy a message of length {message.Data.Length}");
+                if (_logger.IsTrace) _logger.Trace($"Uncompressing with Snappy a message of length {message.Data.Length}");
             }
 
             message.Data = SnappyCodec.Uncompress(message.Data);

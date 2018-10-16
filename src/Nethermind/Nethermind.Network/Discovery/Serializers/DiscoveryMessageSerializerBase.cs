@@ -38,13 +38,13 @@ namespace Nethermind.Network.Discovery.Serializers
 
         protected DiscoveryMessageSerializerBase(
             ISigner signer,
-            IPrivateKeyProvider privateKeyProvider,
+            IPrivateKeyGenerator privateKeyGenerator,
             IDiscoveryMessageFactory messageFactory,
             INodeIdResolver nodeIdResolver,
             INodeFactory nodeFactory)
         {
             _signer = signer ?? throw new ArgumentNullException(nameof(signer));
-            _privateKey = privateKeyProvider.PrivateKey ?? throw new ArgumentNullException(nameof(_privateKey));
+            _privateKey = privateKeyGenerator.Generate() ?? throw new ArgumentNullException(nameof(_privateKey));
             MessageFactory = messageFactory ?? throw new ArgumentNullException(nameof(messageFactory));
             NodeIdResolver = nodeIdResolver ?? throw new ArgumentNullException(nameof(nodeIdResolver));
             NodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
@@ -113,7 +113,7 @@ namespace Nethermind.Network.Discovery.Serializers
             {
                 ipAddress = new IPAddress(ip);
             }
-            catch (Exception exception)
+            catch (Exception)
             {
                 ipAddress = IPAddress.Any;
             }

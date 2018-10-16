@@ -17,6 +17,8 @@
  */
 
 using System;
+using System.IO;
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.CommandLineUtils;
 using Nethermind.Blockchain;
 using Nethermind.Config;
@@ -34,14 +36,13 @@ namespace Nethermind.Runner
 {
     public class RunnerApp : RunnerAppBase, IRunnerApp
     {
-        private static readonly PrivateKey PrivateKey = new PrivateKey("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee");
+        private readonly string _defaultConfigFile = Path.Combine("configs", "mainnet_" + (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "windows" : "posix") + ".config.json");
 
-        private const string DefaultConfigFile = "configs\\default.config.json";
-
-        public RunnerApp(ILogger logger) : base(logger, new PrivateKeyProvider(PrivateKey))
+        public RunnerApp(ILogger logger) : base(logger)
         {
         }
 
+        [Todo("find better way to enforce assemblies with config impl are loaded")]
         protected override (CommandLineApplication, Func<IConfigProvider>, Func<string>) BuildCommandLineApp()
         {
             var app = new CommandLineApplication {Name = "Nethermind.Runner"};
@@ -51,7 +52,6 @@ namespace Nethermind.Runner
 
             IConfigProvider BuildConfigProvider()
             {
-                //TODO find better way to enforce assemblies with config impl are loaded
                 // ReSharper disable once NotAccessedVariable
                 var config = typeof(KeystoreConfig).Assembly;
                 config = typeof(NetworkConfig).Assembly;
@@ -62,9 +62,11 @@ namespace Nethermind.Runner
                 config = typeof(BlockchainConfig).Assembly;
 
                 var configProvider = new JsonConfigProvider();
-                configProvider.LoadJsonConfig(configFile.HasValue() ? configFile.Value() : DefaultConfigFile);
+                string configFilePath = configFile.HasValue() ? configFile.Value() : _defaultConfigFile;
+                Console.WriteLine($"Reading config file from {configFilePath}");
+                configProvider.LoadJsonConfig(configFilePath);
                 return configProvider;
-            };
+            }
 
             string GetBaseDbPath()
             {

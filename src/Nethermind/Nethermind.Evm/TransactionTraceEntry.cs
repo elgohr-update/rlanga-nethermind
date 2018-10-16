@@ -28,39 +28,36 @@ namespace Nethermind.Evm
         {
             Stack = new List<string>();
             Memory = new List<string>();
-            Storage = new Dictionary<string, string>();
         }
 
-        [JsonProperty("pc", Order = 0)]
         public long Pc { get; set; }
 
-        [JsonProperty("op", Order = 1)]
         public string Operation { get; set; }
 
-        [JsonProperty("gas", Order = 2)]
         public long Gas { get; set; }
 
-        [JsonProperty("gasCost", Order = 3)]
         public long GasCost { get; set; }
 
-        [JsonProperty("depth", Order = 4)]
         public int Depth { get; set; }
 
-        [JsonProperty("stack", Order = 5)]
         public List<string> Stack { get; set; }
 
-        [JsonProperty("memory", Order = 6)]
+        public string Error { get; set; }
+        
         public List<string> Memory { get; set; }
 
-        [JsonIgnore]
         public Dictionary<string, string> Storage { get; set; }
 
-        [JsonProperty("storage", Order = 7)]
         public Dictionary<string, string> SortedStorage => Storage.OrderBy(p => p.Key).ToDictionary(p => p.Key, p => p.Value);
 
-        public override string ToString()
+        internal void UpdateMemorySize(ulong size)
         {
-            return base.ToString();
+            // Geth's approach to memory trace is to show empty memory spaces on entry for the values that are being set by the operation
+            int missingChunks = (int)((size - (ulong)Memory.Count * (ulong)EvmPooledMemory.WordSize) / EvmPooledMemory.WordSize);
+            for (int i = 0; i < missingChunks; i++)
+            {
+                Memory.Add("0000000000000000000000000000000000000000000000000000000000000000");
+            }
         }
     }
 }

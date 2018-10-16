@@ -1,5 +1,3 @@
-
-
 /*
  * Copyright (c) 2018 Demerzel Solutions Limited
  * This file is part of the Nethermind library.
@@ -19,12 +17,11 @@
  */
 
 using Nethermind.Core;
-using Nethermind.Core.Specs;
 
 namespace Nethermind.Evm
 {
     public interface ITransactionProcessor
     {
-        TransactionReceipt Execute(Transaction transaction, BlockHeader block);
+        (TransactionReceipt Receipt, TransactionTrace Trace) Execute(int index, Transaction transaction, BlockHeader block, bool shouldTrace);
     }
 }

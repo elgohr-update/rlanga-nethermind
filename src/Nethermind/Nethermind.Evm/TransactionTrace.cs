@@ -18,39 +18,29 @@
 
 using System.Collections.Generic;
 using System.Numerics;
-using Newtonsoft.Json;
 
 namespace Nethermind.Evm
 {
-    public class WrappedTransactionTrace
-    {
-        [JsonProperty("jsonRpc")]
-        public string RpcVersion { get; set; }
-
-        [JsonProperty("id")]
-        public string Id { get; set; }
-
-        [JsonProperty("result")]
-        public TransactionTrace Result { get; set; }
-    }
-
     public class TransactionTrace
     {
+        public List<Dictionary<string, string>> StoragesByDepth { get; } = new List<Dictionary<string, string>>();
+
         public TransactionTrace()
         {
             Entries = new List<TransactionTraceEntry>();
+            StorageTrace = new StorageTrace();
         }
 
-        [JsonProperty("gas", Order = 0)]
-        public BigInteger Gas { get; set; } // TODO: not implemented
+        public StorageTrace StorageTrace { get; set; }
+        
+        public BigInteger Gas { get; set; }
 
-        [JsonProperty("failed", Order = 1)]
-        public bool Failed { get; set; } // TODO: not implemented
+        public bool Failed { get; set; }
 
-        [JsonProperty("returnValue", Order = 2)]
-        public byte[] ReturnValue { get; set; } // TODO: not implemented
-
-        [JsonProperty("structLogs", Order = 3)]
+        public string ReturnValue { get; set; }
+        
         public List<TransactionTraceEntry> Entries { get; set; }
+
+        public static TransactionTrace QuickFail { get; } = new TransactionTrace {Failed = true, ReturnValue = string.Empty};
     }
 }
