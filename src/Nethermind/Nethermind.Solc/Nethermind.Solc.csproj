@@ -13,12 +13,6 @@
     <None Include="./External/Mac/solc.dylib" Link="solc.dylib">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="./External/Posix/libsolc.so.0" Link="libsolc.so.0">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="./External/Posix/libsolc.so.0.0.0" Link="libsolc.so.0.0.0">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="11.0.2" />
