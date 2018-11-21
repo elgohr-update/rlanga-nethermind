@@ -6,11 +6,11 @@ sudo: required
 
 git:
   depth: 3
-notifications:
-  slack:
-    rooms:
-      - demerzelsolutions:hzD3lmq2hbUgHuLFxjCOvk6x#team
-      - demerzelsolutions:hzD3lmq2hbUgHuLFxjCOvk6x#general
+#notifications:
+#  slack:
+#    rooms:
+#      - demerzelsolutions:hzD3lmq2hbUgHuLFxjCOvk6x#team
+#      - demerzelsolutions:hzD3lmq2hbUgHuLFxjCOvk6x#general
 jobs:
   include:
     # - stage: restore and build
@@ -61,17 +61,17 @@ jobs:
     #  name: "Nethermind.Db.Test.Linux"
     #- script: dotnet test src/Nethermind/Nethermind.Db.Test
     #  name: "Nethermind.Db.Test.Osx"
-      os: osx
+#      os: osx
     - script: dotnet test src/Nethermind/Nethermind.Evm.Test
       name: "Nethermind.Evm.Test"
     - script: dotnet test src/Nethermind/Nethermind.JsonRpc.Test
       name: "Nethermind.JsonRpc.Test"
     - script: dotnet test src/Nethermind/Nethermind.KeyStore.Test
       name: "Nethermind.KeyStore.Test"
-    - script: dotnet test src/Nethermind/Nethermind.LibSolc.Test
-      name: "Nethermind.LibSolc.Test.Linux"
-    - script: dotnet test src/Nethermind/Nethermind.LibSolc.Test
-      name: "Nethermind.LibSolc.Test.Osx"
+    - script: dotnet test src/Nethermind/Nethermind.Solc.Test
+      name: "Nethermind.Solc.Test.Linux"
+    - script: dotnet test src/Nethermind/Nethermind.Solc.Test
+      name: "Nethermind.Solc.Test.Osx"
       os: osx
     - script: dotnet test src/Nethermind/Nethermind.Mining.Test
       name: "Nethermind.Mining.Test"
@@ -90,26 +90,26 @@ jobs:
       name: "Nethermind.Store.Test"
     - script: dotnet test src/Nethermind/Nethermind.Wallet.Test
       name: "Nethermind.Wallet.Test"
-    - stage: deploy release version to snap store
-      deploy:
-        provider: snap
-        snap: nethermind
-        channel: stable
-        skip_cleanup: true
-        on:
-          branch: master
-          tags: true
-          condition: "$TRAVIS_TAG =~ ^v.*$"
-    - stage: deploy stable to candidate channel on snap store
-      deploy:
-        provider: snap
-        snap: nethermind
-        channel: beta
-        skip_cleanup: true
-        on:
-          branch: master
-          tags: true
-          condition: "$TRAVIS_TAG =~ ^stable_*$"
+#    - stage: deploy release version to snap store
+#      deploy:
+#        provider: snap
+#        snap: nethermind
+#        channel: stable
+#        skip_cleanup: true
+#        on:
+#          branch: master
+#          tags: true
+#          condition: "$TRAVIS_TAG =~ ^v.*$"
+#    - stage: deploy stable to candidate channel on snap store
+#      deploy:
+#        provider: snap
+#        snap: nethermind
+#        channel: beta
+#        skip_cleanup: true
+#        on:
+#          branch: master
+#          tags: true
+#          condition: "$TRAVIS_TAG =~ ^stable_*$"
     # - stage: deploy to edge channel on snap store
     #   deploy:
     #     provider: snap
