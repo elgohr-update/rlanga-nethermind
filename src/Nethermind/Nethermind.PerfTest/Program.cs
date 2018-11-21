@@ -25,6 +25,9 @@ using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Blockchain;
+using Nethermind.Blockchain.Receipts;
+using Nethermind.Blockchain.TransactionPools;
+using Nethermind.Blockchain.TransactionPools.Storages;
 using Nethermind.Blockchain.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
@@ -151,7 +154,10 @@ namespace Nethermind.PerfTest
             ISnapshotableDb stateDb = new StateDb();
             StateTree stateTree = new StateTree(stateDb);
             IStateProvider stateProvider = new StateProvider(stateTree, new StateDb(), logManager);
-            IBlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), FrontierSpecProvider.Instance, new TransactionStore(new MemDb(), RopstenSpecProvider.Instance), logManager);
+            IBlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), FrontierSpecProvider.Instance,
+                new TransactionPool(NullTransactionStorage.Instance,
+                    new PendingTransactionThresholdValidator(), new Timestamp(),
+                    NullEthereumSigner.Instance, logManager), logManager);
             _machine = new VirtualMachine(stateProvider, new StorageProvider(stateDb, stateProvider, logManager), new BlockhashProvider(blockTree), logManager);
 
             Stopwatch stopwatch = new Stopwatch();
@@ -194,6 +200,7 @@ namespace Nethermind.PerfTest
             public int ChainId => _blockTree.ChainId;
             public BlockHeader Genesis => _blockTree.Genesis;
             public BlockHeader BestSuggested => _blockTree.BestSuggested;
+            public UInt256 BestKnownNumber => _blockTree.BestKnownNumber;
             public BlockHeader Head => _blockTree.Head;
             public bool CanAcceptNewBlocks { get; } = true;
 
@@ -285,6 +292,7 @@ namespace Nethermind.PerfTest
         private static readonly string FullStateDbPath = Path.Combine(DbBasePath, DbOnTheRocks.StateDbPath);
         private static readonly string FullCodeDbPath = Path.Combine(DbBasePath, DbOnTheRocks.CodeDbPath);
         private static readonly string FullReceiptsDbPath = Path.Combine(DbBasePath, DbOnTheRocks.ReceiptsDbPath);
+        private static readonly string FullPendingTxsDbPath = Path.Combine(DbBasePath, DbOnTheRocks.PendingTxsDbPath);
 
         private static readonly string FullBlocksDbPath = Path.Combine(DbBasePath, DbOnTheRocks.BlocksDbPath);
         private static readonly string FullBlockInfosDbPath = Path.Combine(DbBasePath, DbOnTheRocks.BlockInfosDbPath);
@@ -302,14 +310,15 @@ namespace Nethermind.PerfTest
             DeleteDb(FullStateDbPath);
             DeleteDb(FullCodeDbPath);
             DeleteDb(FullReceiptsDbPath);
+            DeleteDb(FullPendingTxsDbPath);
             if (_logger.IsInfo) _logger.Info("State DBs deleted");
 
             /* spec */
-            
+
             var specProvider = RopstenSpecProvider.Instance;
             var difficultyCalculator = new DifficultyCalculator(specProvider);
             var sealEngine = new EthashSealEngine(new Ethash(_logManager), difficultyCalculator, _logManager);
-            
+
             var dbProvider = new RocksDbProvider(DbBasePath, DbConfig.Default);
             var stateDb = dbProvider.StateDb;
             var codeDb = dbProvider.CodeDb;
@@ -318,7 +327,11 @@ namespace Nethermind.PerfTest
             var receiptsDb = dbProvider.ReceiptsDb;
 
             /* store & validation */
-            var blockTree = new UnprocessedBlockTreeWrapper(new BlockTree(blocksDb, blockInfosDb, specProvider, new TransactionStore(new MemDb(), RopstenSpecProvider.Instance), _logManager));
+            var transactionPool = new TransactionPool(NullTransactionStorage.Instance,
+                new PendingTransactionThresholdValidator(), new Timestamp(),
+                NullEthereumSigner.Instance, _logManager);
+            var receiptStorage = new InMemoryReceiptStorage();
+            var blockTree = new UnprocessedBlockTreeWrapper(new BlockTree(blocksDb, blockInfosDb, specProvider, transactionPool, _logManager));
             var headerValidator = new HeaderValidator(blockTree, sealEngine, specProvider, _logManager);
             var ommersValidator = new OmmersValidator(blockTree, headerValidator, _logManager);
             var transactionValidator = new TransactionValidator(new SignatureValidator(ChainId.Ropsten));
@@ -332,14 +345,13 @@ namespace Nethermind.PerfTest
 
             /* blockchain processing */
             var ethereumSigner = new EthereumSigner(specProvider, _logManager);
-            var transactionStore = new TransactionStore(receiptsDb, specProvider);
             var blockhashProvider = new BlockhashProvider(blockTree);
             var virtualMachine = new VirtualMachine(stateProvider, storageProvider, blockhashProvider, _logManager);
             //var processor = new TransactionProcessor(specProvider, stateProvider, storageProvider, virtualMachine, new TransactionTracer("D:\\tx_traces\\perf_test", new UnforgivingJsonSerializer()), _logManager);
             var processor = new TransactionProcessor(specProvider, stateProvider, storageProvider, virtualMachine, _logManager);
             var rewardCalculator = new RewardCalculator(specProvider);
-            var blockProcessor = new BlockProcessor(specProvider, blockValidator, rewardCalculator, processor, stateDb, codeDb, stateProvider, storageProvider, transactionStore, _logManager);
-            var blockchainProcessor = new BlockchainProcessor(blockTree, blockProcessor, ethereumSigner, _logManager);
+            var blockProcessor = new BlockProcessor(specProvider, blockValidator, rewardCalculator, processor, stateDb, codeDb, stateProvider, storageProvider, transactionPool, receiptStorage, _logManager);
+            var blockchainProcessor = new BlockchainProcessor(blockTree, blockProcessor, new TxSignaturesRecoveryStep(ethereumSigner), _logManager, true);
 
             /* load ChainSpec and init */
             ChainSpecLoader loader = new ChainSpecLoader(new UnforgivingJsonSerializer());
@@ -377,14 +389,14 @@ namespace Nethermind.PerfTest
                 }
 
                 totalGas += currentHead.GasUsed;
-                if ((BigInteger)args.Block.Number % 10000 == 9999)
+                if ((BigInteger) args.Block.Number % 10000 == 9999)
                 {
                     stopwatch.Stop();
                     long ms = 1_000L * stopwatch.ElapsedTicks / Stopwatch.Frequency;
                     BigInteger number = args.Block.Number + 1;
                     _logger.Warn($"TOTAL after {number} (ms)     : " + ms);
-                    _logger.Warn($"TOTAL after {number} blocks/s : {(decimal)currentHead.Number / (ms / 1000m),5}");
-                    _logger.Warn($"TOTAL after {number} Mgas/s   : {((decimal)totalGas / 1000000) / (ms / 1000m),5}");
+                    _logger.Warn($"TOTAL after {number} blocks/s : {(decimal) currentHead.Number / (ms / 1000m),5}");
+                    _logger.Warn($"TOTAL after {number} Mgas/s   : {((decimal) totalGas / 1000000) / (ms / 1000m),5}");
                     _logger.Warn($"TOTAL after {number} mem (GC) : {GC.GetTotalMemory(false)}");
                     _logger.Warn($"TOTAL after {number} GC (0)   : {GC.CollectionCount(0)}");
                     _logger.Warn($"TOTAL after {number} GC (1)   : {GC.CollectionCount(1)}");

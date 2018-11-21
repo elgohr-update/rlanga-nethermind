@@ -7,11 +7,12 @@
     <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.App" Version="2.1.2" />
+    <PackageReference Include="Microsoft.AspNetCore.App" Version="2.1.4" />
     <PackageReference Include="Microsoft.Extensions.CommandLineUtils" Version="1.1.1" />
     <PackageReference Include="NLog" Version="4.5.10" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Nethermind.Clique\Nethermind.Clique.csproj" />
     <ProjectReference Include="..\Nethermind.Core\Nethermind.Core.csproj">
       <Project>{5751C57B-9F2D-45DE-BCC2-42645B85E39E}</Project>
       <Name>Nethermind.Core</Name>
@@ -32,13 +33,43 @@
       <Link>chainspec\%(RecursiveDir)%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-  </ItemGroup>
-  <ItemGroup>
-    <Content Update="configs\*.config.json">
+    <Content Include="configs\*.cfg">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+  <ItemGroup>
     <Content Update="NLog.config">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
+    <Content Include="nethermind-runner-wrapper.sh">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <_ContentIncludedByDefault Remove="out\linux-x64\NLog.config" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\web.config" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\foundation.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\kovan.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\morden.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\olympic.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\private_bootnode.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\private_client.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\private_miner1.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\private_miner2.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\rinkeby.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\ropsten.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\chainspec\spaceneth.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\mainnet_posix.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\mainnet_windows.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\rinkeby_posix.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\rinkeby_windows.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\ropsten_posix.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\ropsten_tnodes.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\ropsten_windows.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\spaceneth_posix.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\configs\spaceneth_windows.config.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\Data\genesis.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\Nethermind.Runner.deps.json" />
+    <_ContentIncludedByDefault Remove="out\linux-x64\Nethermind.Runner.runtimeconfig.json" />
   </ItemGroup>
 </Project>

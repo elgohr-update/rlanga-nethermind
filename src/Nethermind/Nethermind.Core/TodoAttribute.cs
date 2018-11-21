@@ -25,29 +25,34 @@ namespace Nethermind.Core
     {
         private readonly string _issueLink;
         private readonly string _comment;
-        private readonly Impr _impr;
+        private readonly Improve _improve;
 
         public TodoAttribute(string comment)
         {
             _comment = comment;
         }
         
-        public TodoAttribute(Impr impr, string issueLink = null)
+        public TodoAttribute(Improve improve, string comment, string issueLink = MissingIssueLinkMessage)
         {
-            _impr = impr;
+            _improve = improve;
             _issueLink = issueLink;
+            _comment = comment;
         }
+
+        public const string MissingIssueLinkMessage = "No issue created or link missing";
     }
 
     [Flags]
-    public enum Impr
+    public enum Improve
     {
-        None,
-        Allocations,
-        MemoryUsage,
-        Performance,
-        Readability,
-        TestCoverage,
-        All
+        None = 0,
+        Allocations = 1,
+        MemoryUsage = 2,
+        Performance = 4,
+        Readability = 8,
+        TestCoverage = 16,
+        Refactor = 32,
+        MissingFunctionality = 64,
+        All = 127
     }
 }

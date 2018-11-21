@@ -24,7 +24,9 @@ using Nethermind.Core.Extensions;
 using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Dirichlet.Numerics;
+using Nethermind.Evm.Tracing;
 using Nethermind.Store;
+using Transaction = Nethermind.Core.Transaction;
 
 namespace Nethermind.Evm
 {
@@ -51,7 +53,18 @@ namespace Nethermind.Evm
             return BuildTransactionReceipt(index, block, transaction, (long)transaction.GasLimit, StatusCode.Failure, LogEntry.EmptyLogs, recipient);
         }
 
+        [Todo("Wider work needed to split calls and execution properly")]
+        public (TransactionReceipt, TransactionTrace) CallAndRestore(int index, Transaction transaction, BlockHeader block, bool shouldTrace)
+        {
+            return Execute(index, transaction, block, shouldTrace, true);
+        }
+
         public (TransactionReceipt, TransactionTrace) Execute(int index, Transaction transaction, BlockHeader block, bool shouldTrace)
+        {
+            return Execute(index, transaction, block, shouldTrace, false);
+        }
+        
+        public (TransactionReceipt, TransactionTrace) Execute(int index, Transaction transaction, BlockHeader block, bool shouldTrace, bool readOnly)
         {
             IReleaseSpec spec = _specProvider.GetSpec(block.Number);
             Address recipient = transaction.To;
@@ -219,25 +232,34 @@ namespace Nethermind.Evm
 
             if (_logger.IsTrace) _logger.Trace("Gas spent: " + spentGas);
 
-            if (statusCode == StatusCode.Failure || !(substate?.DestroyList.Contains(block.Beneficiary) ?? false))
+            Address gasBeneficiary = block.GasBeneficiary;
+            if (statusCode == StatusCode.Failure || !(substate?.DestroyList.Contains(gasBeneficiary) ?? false))
             {
-                if (!_stateProvider.AccountExists(block.Beneficiary))
+                if (!_stateProvider.AccountExists(gasBeneficiary))
                 {
-                    _stateProvider.CreateAccount(block.Beneficiary, (ulong) spentGas * gasPrice);
+                    _stateProvider.CreateAccount(gasBeneficiary, (ulong) spentGas * gasPrice);
                 }
                 else
                 {
-                    _stateProvider.AddToBalance(block.Beneficiary, (ulong) spentGas * gasPrice, spec);
+                    _stateProvider.AddToBalance(gasBeneficiary, (ulong) spentGas * gasPrice, spec);
                 }
             }
 
-//            if (!_specProvider.GetSpec(block.Number).IsEip658Enabled)
-//            {
+            if (!readOnly)
+            {
                 _storageProvider.Commit(spec);
                 _stateProvider.Commit(spec);
-//            }
+            }
+            else
+            {
+                _storageProvider.Reset();
+                _stateProvider.Reset();
+            }
 
-            block.GasUsed += spentGas;
+            if (!readOnly)
+            {
+                block.GasUsed += spentGas;
+            }
 
             if (substate?.Trace != null)
             {
@@ -293,6 +315,7 @@ namespace Nethermind.Evm
             transactionReceipt.GasUsed = spentGas;
             transactionReceipt.Sender = transaction.SenderAddress;
             transactionReceipt.ContractAddress = transaction.IsContractCreation ? recipient : null;
+            transactionReceipt.TransactionHash = transaction.Hash;
             
             return transactionReceipt;
         }

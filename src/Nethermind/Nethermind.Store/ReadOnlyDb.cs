@@ -16,33 +16,42 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
+
 namespace Nethermind.Store
 {
     public class ReadOnlyDb : IDb
     {
         private IDb _memDb = new MemDb();
-        
-        private readonly IDb _wrappedDb;
 
-        public ReadOnlyDb(IDb wrappedDb)
+        private readonly IDb _wrappedDb;
+        private readonly bool _createInMemWriteStore;
+
+        public ReadOnlyDb(IDb wrappedDb, bool createInMemWriteStore)
         {
             _wrappedDb = wrappedDb;
+            _createInMemWriteStore = createInMemWriteStore;
         }
-        
+
         public void Dispose()
         {
-            _wrappedDb.Dispose(); // this is not a right approach but all right for the current use cases
         }
 
         public byte[] this[byte[] key]
         {
-            get
+            get => _memDb[key] ?? _wrappedDb[key];
+            set
             {
-                
-                return _memDb[key] ?? _wrappedDb[key];
+                if (!_createInMemWriteStore)
+                {
+                    throw new InvalidOperationException($"This {nameof(ReadOnlyDb)} did not expect any writes.");
+                }
+
+                _memDb[key] = value;
             }
-            set => _memDb[key] = value;
         }
+
+        public byte[][] GetAll() => _memDb.GetAll();
 
         public void StartBatch()
         {
@@ -50,6 +59,15 @@ namespace Nethermind.Store
 
         public void CommitBatch()
         {
+        }
+
+        public void Remove(byte[] key)
+        {
+        }
+
+        public void ClearTempChanges()
+        {
+            _memDb = new MemDb();
         }
     }
 }

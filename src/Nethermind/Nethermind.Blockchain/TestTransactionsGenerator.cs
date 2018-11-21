@@ -17,11 +17,14 @@
  */
 
 using System;
+using System.IO;
 using System.Timers;
+using Nethermind.Blockchain.TransactionPools;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Logging;
+using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Blockchain
 {
@@ -33,7 +36,7 @@ namespace Nethermind.Blockchain
         private readonly Random _random = new Random();
         private readonly IEthereumSigner _signer;
         private readonly TimeSpan _txDelay;
-        private readonly ITransactionStore _store;
+        private readonly ITransactionPool _transactionPool;
         private readonly Timer _timer = new Timer();
 
         private ulong _count;
@@ -43,10 +46,10 @@ namespace Nethermind.Blockchain
             return _txDelay + TimeSpan.FromMilliseconds((_random.Next((int)_txDelay.TotalMilliseconds) - (int)_txDelay.TotalMilliseconds / 2));
         }
         
-        public TestTransactionsGenerator(ITransactionStore store, IEthereumSigner signer, TimeSpan txDelay, ILogManager logManager)
+        public TestTransactionsGenerator(ITransactionPool transactionPool, IEthereumSigner signer, TimeSpan txDelay, ILogManager logManager)
         {
             _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
-            _store = store ?? throw new ArgumentNullException(nameof(store));
+            _transactionPool = transactionPool ?? throw new ArgumentNullException(nameof(transactionPool));
             _signer = signer ?? throw new ArgumentNullException(nameof(signer));
             _txDelay = txDelay;
 
@@ -64,6 +67,8 @@ namespace Nethermind.Blockchain
 
         public Address SenderAddress { get; }
 
+        private UInt256 _nonce = 0;
+        
         private void TimerOnElapsed(object sender, ElapsedEventArgs elapsedEventArgs)
         {
             _timer.Interval = RandomizeDelay().TotalMilliseconds;
@@ -73,20 +78,21 @@ namespace Nethermind.Blockchain
             tx.GasPrice = 1;
             tx.GasLimit = 21000;
             tx.To = new Address(0x0f.ToBigEndianByteArray().PadLeft(20));
-            tx.Nonce = 0;
+            tx.Nonce = _nonce++;
             tx.Value = 1;
             tx.Data = new byte[0];
             tx.Nonce = _count++;
-            _signer.Sign(_privateKey, tx, 0);
-            Address address = _signer.RecoverAddress(tx, 0);
-            if (address != SenderAddress)
+            tx.SenderAddress = SenderAddress;
+            _signer.Sign(_privateKey, tx, 1);
+            Address address = _signer.RecoverAddress(tx, 1);
+            if (address != tx.SenderAddress)
             {
-                _logger.Debug($"Signature mismatch in tests generator (EIP?).");
+                throw new InvalidDataException($"{nameof(TestTransactionsGenerator)} producing invalid transactions");
             }
 
             tx.Hash = Transaction.CalculateHash(tx);
 
-            _store.AddPending(tx);
+            _transactionPool.AddTransaction(tx, 1);
             _logger.Debug($"Generated a test transaction for testing ({_count - 1}).");
         }
 

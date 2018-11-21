@@ -26,6 +26,9 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Blockchain;
+using Nethermind.Blockchain.Receipts;
+using Nethermind.Blockchain.TransactionPools;
+using Nethermind.Blockchain.TransactionPools.Storages;
 using Nethermind.Blockchain.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
@@ -56,7 +59,7 @@ namespace Ethereum.Test.Base
             DifficultyCalculator = new DifficultuCalculatorWrapper();
             SealEngine = new EthashSealEngine(new Ethash(_logManager), DifficultyCalculator, _logManager); // temporarily keep reusing the same one as otherwise it would recreate cache for each test    
         }
-        
+
         [SetUp]
         public void Setup()
         {
@@ -190,13 +193,13 @@ namespace Ethereum.Test.Base
         private class DifficultuCalculatorWrapper : IDifficultyCalculator
         {
             public IDifficultyCalculator Wrapped { get; set; }
-            
+
             public UInt256 Calculate(UInt256 parentDifficulty, UInt256 parentTimestamp, UInt256 currentTimestamp, UInt256 blockNumber, bool parentHasUncles)
             {
                 return Wrapped.Calculate(parentDifficulty, parentTimestamp, currentTimestamp, blockNumber, parentHasUncles);
             }
         }
-        
+
         protected async Task RunTest(BlockchainTest test, Stopwatch stopwatch = null)
         {
             Assert.IsNull(test.LoadFailure, "test data loading failure");
@@ -234,8 +237,11 @@ namespace Ethereum.Test.Base
             DifficultyCalculator.Wrapped = new DifficultyCalculator(specProvider);
             IRewardCalculator rewardCalculator = new RewardCalculator(specProvider);
 
-            ITransactionStore transactionStore = new TransactionStore(new MemDb(), specProvider);
-            IBlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), specProvider, transactionStore, _logManager);
+            IEthereumSigner signer = new EthereumSigner(specProvider, _logManager);
+            ITransactionPool transactionPool = new TransactionPool(NullTransactionStorage.Instance,
+                new PendingTransactionThresholdValidator(), new Timestamp(), signer, _logManager);
+            IReceiptStorage receiptStorage = new NullReceiptStorage();
+            IBlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), specProvider, transactionPool, _logManager);
             IBlockhashProvider blockhashProvider = new BlockhashProvider(blockTree);
             ISignatureValidator signatureValidator = new SignatureValidator(ChainId.MainNet);
             ITransactionValidator transactionValidator = new TransactionValidator(signatureValidator);
@@ -250,7 +256,6 @@ namespace Ethereum.Test.Base
                 blockhashProvider,
                 _logManager);
 
-            IEthereumSigner signer = new EthereumSigner(specProvider, _logManager);
             IBlockProcessor blockProcessor = new BlockProcessor(
                 specProvider,
                 blockValidator,
@@ -265,14 +270,16 @@ namespace Ethereum.Test.Base
                 codeDb,
                 stateProvider,
                 storageProvider,
-                transactionStore,
+                transactionPool,
+                receiptStorage,
                 _logManager);
 
             IBlockchainProcessor blockchainProcessor = new BlockchainProcessor(
                 blockTree,
                 blockProcessor,
-                signer,
-                _logManager);
+                new TxSignaturesRecoveryStep(signer),
+                _logManager,
+                false);
 
             InitializeTestState(test, stateProvider, storageProvider, specProvider);
 
@@ -458,7 +465,7 @@ namespace Ethereum.Test.Base
 
                 differencesBefore = differences.Count;
 
-                KeyValuePair<UInt256, byte[]>[] clearedStorages = new KeyValuePair<UInt256, byte[]>[0]; 
+                KeyValuePair<UInt256, byte[]>[] clearedStorages = new KeyValuePair<UInt256, byte[]>[0];
                 if (test.Pre.ContainsKey(accountState.Key))
                 {
                     clearedStorages = test.Pre[accountState.Key].Storage.Where(s => !accountState.Value.Storage.ContainsKey(s.Key)).ToArray();
@@ -466,7 +473,7 @@ namespace Ethereum.Test.Base
 
                 foreach (KeyValuePair<UInt256, byte[]> clearedStorage in clearedStorages)
                 {
-                    byte[] value = storageProvider.Get(new StorageAddress(accountState.Key, clearedStorage.Key));
+                    byte[] value = !stateProvider.AccountExists(accountState.Key) ? Bytes.Empty : storageProvider.Get(new StorageAddress(accountState.Key, clearedStorage.Key));
                     if (!value.IsZero())
                     {
                         differences.Add($"{accountState.Key} storage[{clearedStorage.Key}] exp: 0x00, actual: {value.ToHexString(true)}");
@@ -475,7 +482,7 @@ namespace Ethereum.Test.Base
 
                 foreach (KeyValuePair<UInt256, byte[]> storageItem in accountState.Value.Storage)
                 {
-                    byte[] value = storageProvider.Get(new StorageAddress(accountState.Key, storageItem.Key)) ?? new byte[0];
+                    byte[] value = !stateProvider.AccountExists(accountState.Key) ? Bytes.Empty : storageProvider.Get(new StorageAddress(accountState.Key, storageItem.Key)) ?? new byte[0];
                     if (!Bytes.AreEqual(storageItem.Value, value))
                     {
                         differences.Add($"{accountState.Key} storage[{storageItem.Key}] exp: {storageItem.Value.ToHexString(true)}, actual: {value.ToHexString(true)}");

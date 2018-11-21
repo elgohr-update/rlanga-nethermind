@@ -81,8 +81,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Chains", "Chains", "{D75E83
 	ProjectSection(SolutionItems) = preProject
 		Chains\foundation.json = Chains\foundation.json
 		Chains\kovan.json = Chains\kovan.json
-		Chains\morden.json = Chains\morden.json
-		Chains\olympic.json = Chains\olympic.json
 		Chains\private_bootnode.json = Chains\private_bootnode.json
 		Chains\private_client.json = Chains\private_client.json
 		Chains\private_miner1.json = Chains\private_miner1.json
@@ -90,6 +88,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Chains", "Chains", "{D75E83
 		Chains\ropsten.json = Chains\ropsten.json
 		Chains\spaceneth.json = Chains\spaceneth.json
 		Chains\rinkeby.json = Chains\rinkeby.json
+		Chains\goerli.json = Chains\goerli.json
 	EndProjectSection
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.RunnerSpawner", "Nethermind.RunnerSpawner\Nethermind.RunnerSpawner.csproj", "{7285ABAE-A946-437E-A6DD-F1DECFE7F8D5}"
@@ -118,10 +117,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Benchmarks", "Benchmarks", 
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.Evm.Benchmark", "Nethermind.Evm.Benchmark\Nethermind.Evm.Benchmark.csproj", "{E74D4CB5-1F66-4224-A775-494F05C35816}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.DataStreams", "Nethermind.DataStreams\Nethermind.DataStreams.csproj", "{2BFC65EC-03AD-48AC-8FA5-1FB3B10A8539}"
-EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.DataStreams.Test", "Nethermind.DataStreams.Test\Nethermind.DataStreams.Test.csproj", "{95DCBAA9-7C9A-4280-92C9-B34F087E5938}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.DbDiagnostics", "Nethermind.DbDiagnostics\Nethermind.DbDiagnostics.csproj", "{75EB98BF-A07E-4D6B-BAAB-F37EC0459792}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Nethermind.Solc", "Nethermind.Solc\Nethermind.Solc.csproj", "{39947D60-6151-4C6E-BFF8-B407676D6858}"
@@ -145,6 +140,16 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.Wallet", "Nethermind.Wallet\Nethermind.Wallet.csproj", "{8F646907-E900-4AA4-A4FD-F4A8DBC81AA6}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.Wallet.Test", "Nethermind.Wallet.Test\Nethermind.Wallet.Test.csproj", "{7765262D-2A18-4C65-80F6-6C94977A5DAD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.EvmPlayground", "Nethermind.EvmPlayground\Nethermind.EvmPlayground.csproj", "{1FAA38E0-6392-4487-BEF1-7AD8B13A011E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.Clique", "Nethermind.Clique\Nethermind.Clique.csproj", "{EEA444A4-522B-4E09-A822-A69EC007EC5D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.Clique.Test", "Nethermind.Clique.Test\Nethermind.Clique.Test.csproj", "{333F90F5-6A53-40AF-98DC-1DE4B024D5D8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.Abi", "Nethermind.Abi\Nethermind.Abi.csproj", "{2CF36725-5373-4691-B933-65F7BB4DF7C2}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Nethermind.Abi.Test", "Nethermind.Abi.Test\Nethermind.Abi.Test.csproj", "{E513347C-7082-42B8-B3A8-39C3D6992A9B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -328,14 +333,6 @@ Global
 		{E74D4CB5-1F66-4224-A775-494F05C35816}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E74D4CB5-1F66-4224-A775-494F05C35816}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E74D4CB5-1F66-4224-A775-494F05C35816}.Release|Any CPU.Build.0 = Release|Any CPU
-		{2BFC65EC-03AD-48AC-8FA5-1FB3B10A8539}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{2BFC65EC-03AD-48AC-8FA5-1FB3B10A8539}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{2BFC65EC-03AD-48AC-8FA5-1FB3B10A8539}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{2BFC65EC-03AD-48AC-8FA5-1FB3B10A8539}.Release|Any CPU.Build.0 = Release|Any CPU
-		{95DCBAA9-7C9A-4280-92C9-B34F087E5938}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{95DCBAA9-7C9A-4280-92C9-B34F087E5938}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{95DCBAA9-7C9A-4280-92C9-B34F087E5938}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{95DCBAA9-7C9A-4280-92C9-B34F087E5938}.Release|Any CPU.Build.0 = Release|Any CPU
 		{75EB98BF-A07E-4D6B-BAAB-F37EC0459792}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{75EB98BF-A07E-4D6B-BAAB-F37EC0459792}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{75EB98BF-A07E-4D6B-BAAB-F37EC0459792}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -380,6 +377,26 @@ Global
 		{7765262D-2A18-4C65-80F6-6C94977A5DAD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{7765262D-2A18-4C65-80F6-6C94977A5DAD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{7765262D-2A18-4C65-80F6-6C94977A5DAD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1FAA38E0-6392-4487-BEF1-7AD8B13A011E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1FAA38E0-6392-4487-BEF1-7AD8B13A011E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1FAA38E0-6392-4487-BEF1-7AD8B13A011E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1FAA38E0-6392-4487-BEF1-7AD8B13A011E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EEA444A4-522B-4E09-A822-A69EC007EC5D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EEA444A4-522B-4E09-A822-A69EC007EC5D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EEA444A4-522B-4E09-A822-A69EC007EC5D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EEA444A4-522B-4E09-A822-A69EC007EC5D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{333F90F5-6A53-40AF-98DC-1DE4B024D5D8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{333F90F5-6A53-40AF-98DC-1DE4B024D5D8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{333F90F5-6A53-40AF-98DC-1DE4B024D5D8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{333F90F5-6A53-40AF-98DC-1DE4B024D5D8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2CF36725-5373-4691-B933-65F7BB4DF7C2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2CF36725-5373-4691-B933-65F7BB4DF7C2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2CF36725-5373-4691-B933-65F7BB4DF7C2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2CF36725-5373-4691-B933-65F7BB4DF7C2}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E513347C-7082-42B8-B3A8-39C3D6992A9B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E513347C-7082-42B8-B3A8-39C3D6992A9B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E513347C-7082-42B8-B3A8-39C3D6992A9B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E513347C-7082-42B8-B3A8-39C3D6992A9B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -418,13 +435,15 @@ Global
 		{1564814A-27F8-40A3-943E-8E950D5EE17D} = {4019B82F-1104-4D2C-9F96-05FD7D3575E8}
 		{F582324E-2820-4284-B991-CADFCD835632} = {4FD45249-02DC-483E-B76E-100704B3B337}
 		{E74D4CB5-1F66-4224-A775-494F05C35816} = {AE494DDC-4577-46C6-8AC1-4F6254FDA31D}
-		{95DCBAA9-7C9A-4280-92C9-B34F087E5938} = {1564814A-27F8-40A3-943E-8E950D5EE17D}
 		{75EB98BF-A07E-4D6B-BAAB-F37EC0459792} = {E627BFEF-ABD3-4B8F-A9AC-204251AE440C}
 		{39000D58-9F72-4FDC-AB03-AED799129DE6} = {1564814A-27F8-40A3-943E-8E950D5EE17D}
 		{294F2DF2-1F01-4478-A613-EF911C21DD2E} = {499A7CDB-1708-4460-A6B5-9A2B9AC50FAE}
 		{0CD42613-757B-4AA6-903D-CDFC0EAC697B} = {499A7CDB-1708-4460-A6B5-9A2B9AC50FAE}
 		{462BCF0B-2B76-45F0-A73D-34B540FEA569} = {1564814A-27F8-40A3-943E-8E950D5EE17D}
 		{7765262D-2A18-4C65-80F6-6C94977A5DAD} = {1564814A-27F8-40A3-943E-8E950D5EE17D}
+		{1FAA38E0-6392-4487-BEF1-7AD8B13A011E} = {E627BFEF-ABD3-4B8F-A9AC-204251AE440C}
+		{333F90F5-6A53-40AF-98DC-1DE4B024D5D8} = {1564814A-27F8-40A3-943E-8E950D5EE17D}
+		{E513347C-7082-42B8-B3A8-39C3D6992A9B} = {1564814A-27F8-40A3-943E-8E950D5EE17D}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {092CA5E3-6180-4ED7-A3CB-9B57FAC2AA85}

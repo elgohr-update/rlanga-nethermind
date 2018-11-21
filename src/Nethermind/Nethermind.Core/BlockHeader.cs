@@ -46,17 +46,19 @@ namespace Nethermind.Core
 
         public Keccak ParentHash { get; internal set; }
         public Keccak OmmersHash { get; set; }
+        public Address Author { get; set; }
         public Address Beneficiary { get; set; }
+        public Address GasBeneficiary => Author ?? Beneficiary;
 
         public Keccak StateRoot { get; set; }
         public Keccak TransactionsRoot { get; set; }
         public Keccak ReceiptsRoot { get; set; }
         public Bloom Bloom { get; set; }
-        public UInt256 Difficulty { get; internal set; }
+        public UInt256 Difficulty { get; set; }
         public UInt256 Number { get; internal set; }
         public long GasUsed { get; set; }
         public long GasLimit { get; internal set; }
-        public UInt256 Timestamp { get; internal set; }
+        public UInt256 Timestamp { get; set; }
         public byte[] ExtraData { get; set; }
         public Keccak MixHash { get; set; }
         public ulong Nonce { get; set; }

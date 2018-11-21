@@ -33,12 +33,13 @@ namespace Nethermind.Blockchain
     public class BlockchainProcessor : IBlockchainProcessor
     {
         private readonly IBlockProcessor _blockProcessor;
-        private readonly IEthereumSigner _signer;        
+        private readonly IBlockDataRecoveryStep _recoveryStep;
+        private readonly bool _storeReceiptsByDefault;
         private readonly IBlockTree _blockTree;
         private readonly ILogger _logger;
 
         private readonly BlockingCollection<BlockRef> _recoveryQueue = new BlockingCollection<BlockRef>(new ConcurrentQueue<BlockRef>());
-        private readonly BlockingCollection<Block> _blockQueue = new BlockingCollection<Block>(new ConcurrentQueue<Block>(), MaxProcessingQueueSize);
+        private readonly BlockingCollection<BlockRef> _blockQueue = new BlockingCollection<BlockRef>(new ConcurrentQueue<BlockRef>(), MaxProcessingQueueSize);
         private readonly ProcessingStats _stats;
 
         private CancellationTokenSource _loopCancellationSource;
@@ -49,16 +50,19 @@ namespace Nethermind.Blockchain
         private const int SoftMaxRecoveryQueueSizeInTx = 10000; // adjust based on tx or gas
         private const int MaxProcessingQueueSize = 2000; // adjust based on tx or gas
 
+        [Todo(Improve.Refactor, "Store receipts by default should be configurable")]
         public BlockchainProcessor(
             IBlockTree blockTree,
             IBlockProcessor blockProcessor,
-            IEthereumSigner signer,
-            ILogManager logManager)
+            IBlockDataRecoveryStep recoveryStep,
+            ILogManager logManager,
+            bool storeReceiptsByDefault)
         {
             _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
             _blockTree = blockTree ?? throw new ArgumentNullException(nameof(blockTree));
             _blockProcessor = blockProcessor ?? throw new ArgumentNullException(nameof(blockProcessor));
-            _signer = signer ?? throw new ArgumentNullException(nameof(signer));
+            _recoveryStep = recoveryStep ?? throw new ArgumentNullException(nameof(recoveryStep));
+            _storeReceiptsByDefault = storeReceiptsByDefault;
 
             _blockTree.NewBestSuggestedBlock += OnNewBestBlock;
             _stats = new ProcessingStats(_logger);
@@ -66,11 +70,33 @@ namespace Nethermind.Blockchain
 
         private void OnNewBestBlock(object sender, BlockEventArgs blockEventArgs)
         {
-            Block block = blockEventArgs.Block;
+            SuggestBlock(blockEventArgs.Block, _storeReceiptsByDefault ? ProcessingOptions.StoreReceipts : ProcessingOptions.None);
+        }
+
+        public void SuggestBlock(UInt256 blockNumber, ProcessingOptions processingOptions)
+        {
+            if ((processingOptions & ProcessingOptions.ReadOnlyChain) == 0 ||
+                (processingOptions & ProcessingOptions.ForceProcessing) == 0)
+            {
+                throw new InvalidOperationException("Probably not what you meant as when processing old blocks you should not modify the chain and you need to enforce processing");
+            }
+
+            Block block = _blockTree.FindBlock(blockNumber);
+            SuggestBlock(block, processingOptions);
+        }
+
+        public void SuggestBlock(Keccak blockHash, ProcessingOptions processingOptions)
+        {
+            Block block = _blockTree.FindBlock(blockHash, false);
+            SuggestBlock(block, processingOptions);
+        }
+
+        public void SuggestBlock(Block block, ProcessingOptions processingOptions)
+        {
             if (_logger.IsTrace) _logger.Trace($"Enqueuing a new block {block.ToString(Block.Format.Short)} for processing.");
 
             _currentRecoveryQueueSize += block.Transactions.Length;
-            BlockRef blockRef = _currentRecoveryQueueSize >= SoftMaxRecoveryQueueSizeInTx ? new BlockRef(block.Hash) : new BlockRef(block);
+            BlockRef blockRef = _currentRecoveryQueueSize >= SoftMaxRecoveryQueueSizeInTx ? new BlockRef(block.Hash, processingOptions) : new BlockRef(block, processingOptions);
             if (!_recoveryQueue.IsAddingCompleted)
             {
                 _recoveryQueue.Add(blockRef);
@@ -122,9 +148,9 @@ namespace Nethermind.Blockchain
             });
         }
 
-        public async Task StopAsync(bool processRamainingBlocks)
+        public async Task StopAsync(bool processRemainingBlocks)
         {
-            if (processRamainingBlocks)
+            if (processRemainingBlocks)
             {
                 _recoveryQueue.CompleteAdding();
                 await _recoveryTask;
@@ -149,10 +175,11 @@ namespace Nethermind.Blockchain
                 ResolveBlockRef(blockRef);
                 _currentRecoveryQueueSize -= blockRef.Block.Transactions.Length;
                 if (_logger.IsTrace) _logger.Trace($"Recovering addresses for block {blockRef.BlockHash ?? blockRef.Block.Hash}.");
-                _signer.RecoverAddresses(blockRef.Block);
+                _recoveryStep.RecoverData(blockRef.Block);
+
                 try
                 {
-                    _blockQueue.Add(blockRef.Block);
+                    _blockQueue.Add(blockRef);
                 }
                 catch (InvalidOperationException)
                 {
@@ -188,11 +215,20 @@ namespace Nethermind.Blockchain
                 ProcessingQueueEmpty?.Invoke(this, EventArgs.Empty);
             }
 
-            foreach (Block block in _blockQueue.GetConsumingEnumerable(_loopCancellationSource.Token))
+            foreach (BlockRef blockRef in _blockQueue.GetConsumingEnumerable(_loopCancellationSource.Token))
             {
-                if (_logger.IsTrace) _logger.Trace($"Processing block {block.ToString(Block.Format.Short)}).");
+                if (blockRef.IsInDb || blockRef.Block == null)
+                {
+                    throw new InvalidOperationException("Processing loop expects only resolved blocks");
+                }
 
-                Process(block);
+                Block block = blockRef.Block;
+
+                if (_logger.IsTrace) _logger.Trace($"Processing block {block.ToString(Block.Format.Short)}).");
+                Process(block, blockRef.ProcessingOptions, NullTraceListener.Instance);
+                if (_logger.IsTrace) _logger.Trace($"Processed block {block.ToString(Block.Format.Full)}");
+
+                _stats.UpdateStats(block, _recoveryQueue.Count, _blockQueue.Count);
 
                 if (_logger.IsTrace) _logger.Trace($"Now {_blockQueue.Count} blocks waiting in the queue.");
                 if (_blockQueue.Count == 0)
@@ -202,21 +238,9 @@ namespace Nethermind.Blockchain
             }
         }
 
-        private void Process(Block suggestedBlock)
-        {
-            Process(suggestedBlock, ProcessingOptions.None, NullTraceListener.Instance);
-            if (_logger.IsTrace) _logger.Trace($"Processed block {suggestedBlock.ToString(Block.Format.Full)}");
-
-            _stats.UpdateStats(suggestedBlock, _recoveryQueue.Count, _blockQueue.Count);
-        }
-
-        public void AddTxData(Block block)
-        {
-            Process(block, ProcessingOptions.ForceProcessing | ProcessingOptions.StoreReceipts, NullTraceListener.Instance);
-        }
-
         public event EventHandler ProcessingQueueEmpty;
 
+        [Todo("Introduce priority queue and create a SuggestWithPriority that waits for block execution to return a block, then make this private")]
         public Block Process(Block suggestedBlock, ProcessingOptions options, ITraceListener traceListener)
         {
             RunSimpleChecksAheadOfProcessing(suggestedBlock, options);
@@ -258,7 +282,7 @@ namespace Nethermind.Blockchain
 
                 List<Block> unprocessedBlocksToBeAddedToMain = new List<Block>();
                 Block[] blocks;
-                if (options.HasFlag(ProcessingOptions.ForceProcessing))
+                if ((options & ProcessingOptions.ForceProcessing) != 0)
                 {
                     blocksToBeAddedToMain.Clear();
                     blocks = new Block[1];
@@ -277,7 +301,7 @@ namespace Nethermind.Blockchain
 
                         unprocessedBlocksToBeAddedToMain.Add(block);
                     }
-                    
+
                     blocks = new Block[unprocessedBlocksToBeAddedToMain.Count];
                     for (int i = 0; i < unprocessedBlocksToBeAddedToMain.Count; i++)
                     {
@@ -289,15 +313,12 @@ namespace Nethermind.Blockchain
 
                 for (int i = 0; i < blocks.Length; i++)
                 {
-                    /* this can happen if the block was loaded as an ancestor and did not go thtough the recovery queue */
-                    if (!blocks[i].HasAddressesRecovered)
-                    {
-                        _signer.RecoverAddresses(blocks[i]);
-                    }
+                    /* this can happen if the block was loaded as an ancestor and did not go through the recovery queue */
+                    _recoveryStep.RecoverData(blocks[i]);
                 }
 
                 processedBlocks = _blockProcessor.Process(stateRoot, blocks, options, traceListener);
-                if (!options.HasFlag(ProcessingOptions.ReadOnlyChain) && !options.HasFlag(ProcessingOptions.ForceProcessing))
+                if ((options & ProcessingOptions.ReadOnlyChain) == 0)
                 {
                     // TODO: lots of unnecessary loading and decoding here, review after adding support for loading headers only
                     List<BlockHeader> blocksToBeRemovedFromMain = new List<BlockHeader>();
@@ -349,7 +370,7 @@ namespace Nethermind.Blockchain
                 throw new InvalidOperationException("Block without total difficulty calculated was suggested for processing");
             }
 
-            if (!options.HasFlag(ProcessingOptions.ReadOnlyChain) && suggestedBlock.Hash == null)
+            if ((options & ProcessingOptions.ReadOnlyChain) == 0 && suggestedBlock.Hash == null)
             {
                 throw new InvalidOperationException("Block hash should be known at this stage if the block is not read only");
             }
@@ -365,23 +386,26 @@ namespace Nethermind.Blockchain
 
         private class BlockRef
         {
-            public BlockRef(Block block)
+            public BlockRef(Block block, ProcessingOptions processingOptions = ProcessingOptions.None)
             {
                 Block = block;
+                ProcessingOptions = processingOptions;
                 IsInDb = false;
                 BlockHash = null;
             }
 
-            public BlockRef(Keccak blockHash)
+            public BlockRef(Keccak blockHash, ProcessingOptions processingOptions = ProcessingOptions.None)
             {
                 Block = null;
                 IsInDb = true;
                 BlockHash = blockHash;
+                ProcessingOptions = processingOptions;
             }
 
             public bool IsInDb { get; set; }
             public Keccak BlockHash { get; set; }
             public Block Block { get; set; }
+            public ProcessingOptions ProcessingOptions { get; }
         }
     }
 }

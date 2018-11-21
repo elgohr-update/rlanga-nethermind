@@ -20,33 +20,49 @@ using System;
 
 namespace Nethermind.Store
 {
-    public class ReadOnlyDbProvider : IDbProvider
+    public class ReadOnlyDbProvider : IReadOnlyDbProvider
     {
-        private readonly IDbProvider _wrappedProvider;
-
-        public ReadOnlyDbProvider(IDbProvider wrappedProvider)
+        public ReadOnlyDbProvider(IDbProvider wrappedProvider, bool createInMemoryWriteStore)
         {
-            _wrappedProvider = wrappedProvider ?? throw new ArgumentNullException(nameof(wrappedProvider));
-            StateDb = new StateDb(new ReadOnlyDb(wrappedProvider.StateDb));
-            CodeDb = new StateDb(new ReadOnlyDb(wrappedProvider.CodeDb));
-            ReceiptsDb = new ReadOnlyDb(wrappedProvider.ReceiptsDb);
-            BlockInfosDb = new ReadOnlyDb(wrappedProvider.BlockInfosDb);
-            BlocksDb = new ReadOnlyDb(wrappedProvider.BlocksDb);
+            wrappedProvider = wrappedProvider ?? throw new ArgumentNullException(nameof(wrappedProvider));
+
+            NestedStateDb = new ReadOnlyDb(wrappedProvider.StateDb, createInMemoryWriteStore);
+            StateDb = new StateDb(NestedStateDb);
+            NestedCodeDb = new ReadOnlyDb(wrappedProvider.CodeDb, createInMemoryWriteStore);
+            CodeDb = new StateDb(NestedCodeDb);
+            NestedReceiptsDb = new ReadOnlyDb(wrappedProvider.ReceiptsDb, createInMemoryWriteStore);
+            NestedBlockInfosDb = new ReadOnlyDb(wrappedProvider.BlockInfosDb, createInMemoryWriteStore);
+            NestedBlocksDb = new ReadOnlyDb(wrappedProvider.BlocksDb, createInMemoryWriteStore);
+            NestedPendingTxsDb = new ReadOnlyDb(wrappedProvider.PendingTxsDb, createInMemoryWriteStore); 
         }
-        
+
+
         public void Dispose()
         {
-            StateDb.Dispose();
-            CodeDb.Dispose();
-            ReceiptsDb.Dispose();
-            BlockInfosDb.Dispose();
-            BlocksDb.Dispose();
         }
 
+        private ReadOnlyDb NestedStateDb { get; }
+        private ReadOnlyDb NestedCodeDb { get; }
         public ISnapshotableDb StateDb { get; }
         public ISnapshotableDb CodeDb { get; }
-        public IDb ReceiptsDb { get; }
-        public IDb BlocksDb { get; }
-        public IDb BlockInfosDb { get; }
+        public IDb ReceiptsDb => NestedReceiptsDb;
+        public IDb BlocksDb => NestedBlocksDb;
+        public IDb BlockInfosDb => NestedBlockInfosDb;
+        public IDb PendingTxsDb => NestedPendingTxsDb;
+        public ReadOnlyDb NestedReceiptsDb { get; }
+        public ReadOnlyDb NestedBlocksDb { get; }
+        public ReadOnlyDb NestedBlockInfosDb { get; }
+        public ReadOnlyDb NestedPendingTxsDb { get; }
+        
+        public void ClearTempChanges()
+        {
+            StateDb.Restore(-1);
+            CodeDb.Restore(-1);
+            NestedStateDb.ClearTempChanges();
+            NestedCodeDb.ClearTempChanges();
+            NestedReceiptsDb.ClearTempChanges();
+            NestedBlocksDb.ClearTempChanges();
+            NestedBlockInfosDb.ClearTempChanges();
+        }
     }
 }

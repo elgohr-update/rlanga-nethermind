@@ -20,6 +20,11 @@ using System;
 
 namespace Nethermind.Store
 {
+    public interface IReadOnlyDbProvider : IDbProvider
+    {
+        void ClearTempChanges();
+    }
+    
     public interface IDbProvider : IDisposable
     {
         ISnapshotableDb StateDb { get; }
@@ -27,6 +32,7 @@ namespace Nethermind.Store
         IDb ReceiptsDb { get; }
         IDb BlocksDb { get; }
         IDb BlockInfosDb { get; }
+        IDb PendingTxsDb { get; }
         // add C#8 Dispose (default implementation)
     }
 }

@@ -16,38 +16,52 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Nethermind.Blockchain.Filters.Topics;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Dirichlet.Numerics;
+using NLog.Filters;
 
 namespace Nethermind.Blockchain.Filters
 {
     public class FilterStore : IFilterStore
     {
+        private int _nextFilterId;
+
         private readonly ConcurrentDictionary<int, FilterBase> _filters = new ConcurrentDictionary<int, FilterBase>();
 
-        public IReadOnlyCollection<Filter> GetAll()
+        public bool FilterExists(int filterId) => _filters.ContainsKey(filterId);
+
+        public FilterType GetFilterType(int filterId)
         {
-            return _filters.Select(f => f.Value).OfType<Filter>().ToList();
+            /* so far ok to use block filter if none */
+            _filters.TryGetValue(filterId, out FilterBase filter);
+            return filter?.GetType() == typeof(LogFilter) ? FilterType.LogFilter : FilterType.BlockFilter;
         }
 
-        public BlockFilter CreateBlockFilter(UInt256 startBlockNumber)
+        public T[] GetFilters<T>() where T : FilterBase
         {
-            BlockFilter blockFilter = new BlockFilter(GetFilterId(), startBlockNumber);
-            AddFilter(blockFilter);
+            return _filters.Select(f => f.Value).OfType<T>().ToArray();
+        }
+
+        public BlockFilter CreateBlockFilter(UInt256 startBlockNumber, bool setId = true)
+        {
+            var filterId = setId ? GetFilterId() : 0;
+            var blockFilter = new BlockFilter(filterId, startBlockNumber);
             return blockFilter;
         }
 
-        public Filter CreateFilter(FilterBlock fromBlock, FilterBlock toBlock, 
-            object address = null, IEnumerable<object> topics = null)
+        public LogFilter CreateLogFilter(FilterBlock fromBlock, FilterBlock toBlock,
+            object address = null, IEnumerable<object> topics = null, bool setId = true)
         {
-            var filter = new Filter(GetFilterId(), fromBlock, toBlock, 
+            var filterId = setId ? GetFilterId() : 0;
+            var filter = new LogFilter(filterId, fromBlock, toBlock,
                 GetAddress(address), GetTopicsFilter(topics));
-            AddFilter(filter);
 
             return filter;
         }
@@ -55,34 +69,56 @@ namespace Nethermind.Blockchain.Filters
         public void RemoveFilter(int filterId)
         {
             _filters.TryRemove(filterId, out _);
+            FilterRemoved?.Invoke(this, new FilterEventArgs(filterId));
         }
 
-        private void AddFilter(FilterBase filter)
+        public event EventHandler<FilterEventArgs> FilterRemoved;
+
+        public void SaveFilter(FilterBase filter)
         {
+            if (_filters.ContainsKey(filter.Id))
+            {
+                throw new InvalidOperationException($"Filter with ID {filter.Id} already exists");
+            }
+
+            _nextFilterId = Math.Max(filter.Id + 1, _nextFilterId);
             _filters[filter.Id] = filter;
         }
 
-        private int GetFilterId() => _filters.Any() ? _filters.Max(f => f.Key) + 1 : 1;
-        
+        private int GetFilterId() => _nextFilterId++;
+
         private TopicsFilter GetTopicsFilter(IEnumerable<object> topics = null)
         {
+            if (topics == null)
+            {
+                return TopicsFilter.AnyTopic;
+            }
+
             var filterTopics = GetFilterTopics(topics);
             var expressions = new List<TopicExpression>();
 
             for (int i = 0; i < filterTopics.Length; i++)
             {
-                var filterTopic = filterTopics[i];
-                var orExpression = new OrExpression(new[]
-                {
-                    GetTopicExpression(filterTopic.First),
-                    GetTopicExpression(filterTopic.Second)
-                });
-                expressions.Add(orExpression);
+                expressions.Add(GetTopicExpression(filterTopics[i]));
             }
 
             return new TopicsFilter(expressions.ToArray());
         }
-        
+
+        private TopicExpression GetTopicExpression(FilterTopic filterTopic)
+        {
+            if (filterTopic == null)
+            {
+                return new AnyTopic();
+            }
+
+            return new OrExpression(new[]
+            {
+                GetTopicExpression(filterTopic.First),
+                GetTopicExpression(filterTopic.Second)
+            });
+        }
+
         private TopicExpression GetTopicExpression(Keccak topic)
         {
             if (topic == null)
@@ -93,15 +129,24 @@ namespace Nethermind.Blockchain.Filters
             return new SpecificTopic(topic);
         }
 
-        private static FilterAddress GetAddress(object address)
+        private static AddressFilter GetAddress(object address)
         {
-            return address is null
-                ? null
-                : new FilterAddress
-                {
-                    Address = address is string s ? new Address(s) : null,
-                    Addresses = address is IEnumerable<string> e ? e.Select(a => new Address(a)).ToList() : null
-                };
+            if (address is null)
+            {
+                return AddressFilter.AnyAddress; 
+            }
+
+            if (address is string s)
+            {
+                return new AddressFilter(new Address(s));
+            }
+            
+            if (address is IEnumerable<string> e)
+            {
+                return new AddressFilter(e.Select(a => new Address(a)).ToHashSet());
+            }
+            
+            throw new InvalidDataException("Invalid address filter format");
         }
 
         private static FilterTopic[] GetFilterTopics(IEnumerable<object> topics)
@@ -123,8 +168,8 @@ namespace Nethermind.Blockchain.Filters
             }
 
             var topics = (obj as IEnumerable<string>)?.ToList();
-            string first = topics?.FirstOrDefault();
-            string second = topics?.Skip(1).FirstOrDefault();
+            var first = topics?.FirstOrDefault();
+            var second = topics?.Skip(1).FirstOrDefault();
 
             return new FilterTopic
             {

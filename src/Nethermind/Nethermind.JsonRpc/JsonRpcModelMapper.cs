@@ -24,6 +24,7 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
 using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm;
+using Nethermind.Evm.Tracing;
 using Nethermind.JsonRpc.DataModel;
 using Block = Nethermind.JsonRpc.DataModel.Block;
 using StorageTrace = Nethermind.JsonRpc.DataModel.StorageTrace;
@@ -37,13 +38,6 @@ namespace Nethermind.JsonRpc
 {
     public class JsonRpcModelMapper : IJsonRpcModelMapper
     {
-        private readonly IEthereumSigner _signer;
-
-        public JsonRpcModelMapper(IEthereumSigner signer)
-        {
-            _signer = signer;
-        }
-
         public Block MapBlock(Core.Block block, bool returnFullTransactionObjects)
         {
             Transaction[] transactions = null;
@@ -92,7 +86,7 @@ namespace Nethermind.JsonRpc
             blockModel.ReceiptsRoot = new Data(block.Header.ReceiptsRoot);
             blockModel.Miner = block.Header.Beneficiary != null ? new Data(block.Header.Beneficiary) : null;
             blockModel.Difficulty = new Quantity(block.Header.Difficulty);
-            //TotalDifficulty = new Quantity(block.Header.Difficulty),
+            blockModel.TotalDifficulty = new Quantity(block.Header.TotalDifficulty ?? 0);
             blockModel.ExtraData = new Data(block.Header.ExtraData);
             //Size = new Quantity(block.Header.)
             blockModel.GasLimit = new Quantity(block.Header.GasLimit);
@@ -145,7 +139,7 @@ namespace Nethermind.JsonRpc
             tx.GasPrice = transaction.GasPrice?.Value.ToUInt256() ?? 0;
             tx.Nonce = transaction.Nonce?.Value.ToUInt256() ?? 0; // here pick the last nonce?
             tx.To = transaction.To == null ? null : new Address(transaction.To.Value);
-            tx.SenderAddress = new Address(transaction.From.Value);
+            tx.SenderAddress = transaction.From == null ? null : new Address(transaction.From.Value);
             tx.Value = transaction.Value?.Value.ToUInt256() ?? UInt256.Zero;
             if (tx.To == null)
             {
@@ -161,7 +155,7 @@ namespace Nethermind.JsonRpc
 
         public TransactionReceipt MapTransactionReceipt(Keccak hash, Core.TransactionReceipt receipt)
         {
-            return new TransactionReceipt
+            TransactionReceipt mapped = new TransactionReceipt
             {
                 TransactionHash = new Data(hash),
                 TransactionIndex = new Quantity(receipt.Index),
@@ -172,13 +166,24 @@ namespace Nethermind.JsonRpc
                 From = new Data(receipt.Sender),
                 To = new Data(receipt.Recipient),
                 ContractAddress = new Data(receipt.ContractAddress),
-                Logs = receipt.Logs?.Select(MapLog).ToArray(),
+                Logs = receipt.Logs?.Select(MapLog).ToArray() ?? Array.Empty<Log>(),
                 LogsBloom = new Data(receipt.Bloom?.Bytes),
                 Status = new Quantity(receipt.StatusCode)
             };
+
+            for (int i = 0; i < mapped.Logs.Length; i++)
+            {
+                mapped.Logs[i].BlockHash = mapped.BlockHash;
+                mapped.Logs[i].BlockNumber = mapped.BlockNumber;
+                mapped.Logs[i].LogIndex = new Quantity(i);
+                mapped.Logs[i].TransactionHash = mapped.TransactionHash;
+                mapped.Logs[i].TransactionIndex = mapped.TransactionIndex;
+            }
+
+            return mapped;
         }
 
-        public TransactionTrace MapTransactionTrace(Evm.TransactionTrace transactionTrace)
+        public TransactionTrace MapTransactionTrace(Evm.Tracing.TransactionTrace transactionTrace)
         {
             if (transactionTrace == null)
             {
@@ -206,7 +211,7 @@ namespace Nethermind.JsonRpc
             };
         }
         
-        public StorageTrace MapStorageTrace(Evm.StorageTrace storageTrace)
+        public StorageTrace MapStorageTrace(Evm.Tracing.StorageTrace storageTrace)
         {
             if (storageTrace == null)
             {
@@ -234,7 +239,11 @@ namespace Nethermind.JsonRpc
 
         public Log MapLog(LogEntry logEntry)
         {
-            throw new System.NotImplementedException();
+            Log log = new Log();
+            log.Data = new Data(logEntry.Data);
+            log.Address = new Data(logEntry.LoggersAddress);
+            log.Topics = logEntry.Topics.Select(t => new Data(t)).ToArray();
+            return log;
         }
     }
 }

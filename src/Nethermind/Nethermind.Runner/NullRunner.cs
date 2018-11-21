@@ -42,7 +42,8 @@ namespace Nethermind.Runner
             return Task.CompletedTask;
         }
 
-        public IBlockchainBridge BlockchainBridge { get; }
-        public IEthereumSigner EthereumSigner { get; }
+        public IBlockchainBridge BlockchainBridge => null;
+        public INetBridge NetBridge => null;
+        public IDebugBridge DebugBridge => null;
     }
 }

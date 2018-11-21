@@ -17,11 +17,14 @@
  */
 
 using System;
+using Nethermind.Blockchain.Receipts;
+using Nethermind.Blockchain.TransactionPools;
 using Nethermind.Blockchain.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm;
+using Nethermind.Evm.Tracing;
 
 namespace Nethermind.Blockchain
 {
@@ -29,12 +32,12 @@ namespace Nethermind.Blockchain
     {
         private readonly IBlockTree _blockTree;
         private readonly IBlockchainProcessor _processor;
-        private readonly ITransactionStore _txStore;
+        private readonly IReceiptStorage _receiptStorage;
 
-        public TxTracer(IBlockchainProcessor processor, ITransactionStore txStore, IBlockTree blockTree)
+        public TxTracer(IBlockchainProcessor processor, IReceiptStorage receiptStorage, IBlockTree blockTree)
         {
             _processor = processor ?? throw new ArgumentNullException(nameof(processor));
-            _txStore = txStore ?? throw new ArgumentNullException(nameof(txStore));
+            _receiptStorage = receiptStorage ?? throw new ArgumentNullException(nameof(receiptStorage));
             _blockTree = blockTree ?? throw new ArgumentNullException(nameof(blockTree));
         }
 
@@ -50,7 +53,7 @@ namespace Nethermind.Blockchain
 
         public TransactionTrace Trace(Keccak txHash)
         {
-            TransactionReceipt receipt = _txStore.GetReceipt(txHash);
+            TransactionReceipt receipt = _receiptStorage.Get(txHash);
             Block block = _blockTree.FindBlock(receipt.BlockNumber);
             if (block == null) throw new InvalidOperationException("Only historical blocks");
 
@@ -71,9 +74,9 @@ namespace Nethermind.Blockchain
         {
             Block block = _blockTree.FindBlock(blockNumber);
             if (block == null) throw new InvalidOperationException("Only historical blocks");
-            block.Transactions = new [] {tx};
+            block.Transactions = new[] {tx};
             TraceListener listener = new TraceListener(tx.Hash);
-            _processor.Process(block, ProcessingOptions.ForceProcessing | ProcessingOptions.NoValidation, listener);
+            _processor.Process(block, ProcessingOptions.ForceProcessing | ProcessingOptions.NoValidation | ProcessingOptions.WithRollback | ProcessingOptions.ReadOnlyChain, listener);
             return listener.Trace;
         }
 
@@ -92,7 +95,7 @@ namespace Nethermind.Blockchain
         private TransactionTrace Trace(Block block, Keccak txHash)
         {
             TraceListener listener = new TraceListener(txHash);
-            _processor.Process(block, ProcessingOptions.ForceProcessing, listener);
+            _processor.Process(block, ProcessingOptions.ForceProcessing | ProcessingOptions.WithRollback | ProcessingOptions.ReadOnlyChain, listener);
             return listener.Trace;
         }
 
@@ -107,7 +110,7 @@ namespace Nethermind.Blockchain
             }
 
             BlockTraceListener listener = new BlockTraceListener(block);
-            _processor.Process(block, ProcessingOptions.ForceProcessing, listener);
+            _processor.Process(block, ProcessingOptions.ForceProcessing | ProcessingOptions.WithRollback | ProcessingOptions.ReadOnlyChain | ProcessingOptions.NoValidation, listener);
             return listener.BlockTrace;
         }
     }

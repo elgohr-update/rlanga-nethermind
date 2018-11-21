@@ -22,6 +22,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DotNetty.Transport.Channels;
 using Nethermind.Blockchain;
+using Nethermind.Blockchain.TransactionPools;
 using Nethermind.Core;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Logging;
@@ -42,6 +43,9 @@ namespace Nethermind.Network.P2P
         private readonly ISynchronizationManager _syncManager;
         private readonly INodeStatsProvider _nodeStatsProvider;
         private readonly IPerfService _perfService;
+        private readonly IBlockTree _blockTree;
+        private readonly ITransactionPool _transactionPool;
+        private readonly ITimestamp _timestamp;
         private readonly Dictionary<string, IProtocolHandler> _protocols = new Dictionary<string, IProtocolHandler>();
 
         private readonly IChannel _channel;
@@ -62,16 +66,23 @@ namespace Nethermind.Network.P2P
             INodeStatsProvider nodeStatsProvider,
             INodeStats nodeStats,
             ILogManager logManager,
-            IChannel channel, IPerfService perfService)
+            IChannel channel,
+            IPerfService perfService,
+            IBlockTree blockTree,
+            ITransactionPool transactionPool,
+            ITimestamp timestamp)
         {
+            _logManager = logManager ?? throw new ArgumentNullException(nameof(logManager));
+            _channel = channel ?? throw new ArgumentNullException(nameof(channel));
+            _nodeStatsProvider = nodeStatsProvider ?? throw new ArgumentNullException(nameof(nodeStatsProvider));
+            _perfService = perfService ?? throw new ArgumentNullException(nameof(perfService));
+            _blockTree = blockTree;
+            _transactionPool = transactionPool;
+            _timestamp = timestamp;
             _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
             _syncManager = syncManager ?? throw new ArgumentNullException(nameof(syncManager));
-            _logManager = logManager ?? throw new ArgumentNullException(nameof(logManager));
             _logger = logManager.GetClassLogger();
-            _channel = channel;
-            _perfService = perfService;
-
-            _nodeStatsProvider = nodeStatsProvider;
+            
             NodeStats = nodeStats;
             LocalNodeId = localNodeId;
             RemoteNodeId = remoteId;
@@ -249,15 +260,14 @@ namespace Nethermind.Network.P2P
                 case Protocol.Eth:
                     if (version < 62 || version > 63)
                     {
-                        throw new NotSupportedException();
+                        throw new NotSupportedException($"Eth protocolo version {version} is not supported.");
                     }
 
                     protocolHandler = version == 62
-                        ? new Eth62ProtocolHandler(this, _serializer, _syncManager, _logManager, _perfService)
-                        : new Eth63ProtocolHandler(this, _serializer, _syncManager, _logManager, _perfService);
+                        ? new Eth62ProtocolHandler(this, _serializer, _syncManager, _logManager, _perfService, _blockTree, _transactionPool, _timestamp)
+                        : new Eth63ProtocolHandler(this, _serializer, _syncManager, _logManager, _perfService, _blockTree, _transactionPool, _timestamp);
                     protocolHandler.ProtocolInitialized += (sender, args) =>
                     {
-                        //await _syncManager.AddPeer((Eth62ProtocolHandler)protocolHandler);
                         ProtocolInitialized?.Invoke(this, args);
                     };
                     break;

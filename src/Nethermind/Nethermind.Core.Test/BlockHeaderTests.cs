@@ -18,6 +18,7 @@
 
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
+using Nethermind.Core.Specs;
 using NUnit.Framework;
 
 namespace Nethermind.Core.Test
@@ -74,6 +75,17 @@ namespace Nethermind.Core.Test
             header.Hash = BlockHeader.CalculateHash(header);
 
             Assert.AreEqual(new Keccak(Bytes.FromHexString("0x1423c2875714c31049cacfea8450f66a73ecbd61d7a6ab13089406a491aa9fc2")), header.Hash);
+        }
+
+        [Test]
+        public void Author()
+        {
+            Address author = new Address("0x05a56e2d52c817161883f50c441c3228cfe54d9f");
+
+            BlockHeader header = new BlockHeader();
+            header.Beneficiary = author;
+
+            Assert.AreEqual(author, header.GasBeneficiary);
         }
     }
 }

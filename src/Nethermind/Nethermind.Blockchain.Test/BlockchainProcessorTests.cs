@@ -20,13 +20,18 @@ using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Nethermind.Blockchain.Receipts;
+using Nethermind.Blockchain.TransactionPools;
+using Nethermind.Blockchain.TransactionPools.Storages;
 using Nethermind.Blockchain.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Specs.ChainSpec;
+using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm;
+using Nethermind.Evm.Tracing;
 using Nethermind.Mining;
 using Nethermind.Mining.Difficulty;
 using Nethermind.Store;
@@ -40,7 +45,9 @@ namespace Nethermind.Blockchain.Test
         [Test]
         public async Task Test()
         {
-            TimeSpan miningDelay = TimeSpan.FromMilliseconds(50);
+            int timeMultiplier = 1; // for debugging
+            
+            TimeSpan miningDelay = TimeSpan.FromMilliseconds(50 * timeMultiplier);
 
             /* logging & instrumentation */
             OneLoggerLogManager logger = new OneLoggerLogManager(new SimpleConsoleLogger(true));
@@ -52,9 +59,14 @@ namespace Nethermind.Blockchain.Test
             RopstenSpecProvider specProvider = RopstenSpecProvider.Instance;
 
             /* store & validation */
+            
+            EthereumSigner ethereumSigner = new EthereumSigner(specProvider, NullLogManager.Instance);
             MemDb receiptsDb = new MemDb();
-            TransactionStore transactionStore = new TransactionStore(receiptsDb, specProvider);
-            BlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), specProvider, transactionStore, logger);
+            TransactionPool transactionPool = new TransactionPool(new NullTransactionStorage(),
+                new PendingTransactionThresholdValidator(), new Timestamp(), ethereumSigner, logger);
+            IReceiptStorage receiptStorage = new PersistentReceiptStorage(receiptsDb, specProvider);
+            BlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), specProvider, transactionPool, logger);
+            Timestamp timestamp = new Timestamp();
             DifficultyCalculator difficultyCalculator = new DifficultyCalculator(specProvider);
             HeaderValidator headerValidator = new HeaderValidator(blockTree, sealEngine, specProvider, logger);
             OmmersValidator ommersValidator = new OmmersValidator(blockTree, headerValidator, logger);
@@ -68,22 +80,21 @@ namespace Nethermind.Blockchain.Test
             StateProvider stateProvider = new StateProvider(stateTree, codeDb, logger);
             StorageProvider storageProvider = new StorageProvider(stateDb, stateProvider, logger);
 
-            /* blockchain processing */
-            EthereumSigner ethereumSigner = new EthereumSigner(specProvider, logger);
-
-            TestTransactionsGenerator generator = new TestTransactionsGenerator(transactionStore, new EthereumSigner(specProvider, NullLogManager.Instance), TimeSpan.FromMilliseconds(5), NullLogManager.Instance);
+            TestTransactionsGenerator generator = new TestTransactionsGenerator(transactionPool, ethereumSigner, TimeSpan.FromMilliseconds(5 * timeMultiplier), NullLogManager.Instance);
             generator.Start();
 
+            /* blockchain processing */
             BlockhashProvider blockhashProvider = new BlockhashProvider(blockTree);
             VirtualMachine virtualMachine = new VirtualMachine(stateProvider, storageProvider, blockhashProvider, logger);
             TransactionProcessor processor = new TransactionProcessor(specProvider, stateProvider, storageProvider, virtualMachine, logger);
             RewardCalculator rewardCalculator = new RewardCalculator(specProvider);
-            BlockProcessor blockProcessor = new BlockProcessor(specProvider, blockValidator, rewardCalculator, processor, stateDb, codeDb, stateProvider, storageProvider, transactionStore, logger);
-            BlockchainProcessor blockchainProcessor = new BlockchainProcessor(blockTree, blockProcessor, ethereumSigner, logger);
+            BlockProcessor blockProcessor = new BlockProcessor(specProvider, blockValidator, rewardCalculator,
+                processor, stateDb, codeDb, stateProvider, storageProvider, transactionPool, receiptStorage, logger);
+            BlockchainProcessor blockchainProcessor = new BlockchainProcessor(blockTree, blockProcessor, new TxSignaturesRecoveryStep(ethereumSigner), logger, false);
 
             /* load ChainSpec and init */
             ChainSpecLoader loader = new ChainSpecLoader(new UnforgivingJsonSerializer());
-            string path = Path.Combine(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\Chains", "ropsten.json"));
+            string path = "chainspec.json";
             logger.GetClassLogger().Info($"Loading ChainSpec from {path}");
             ChainSpec chainSpec = loader.Load(File.ReadAllBytes(path));
             foreach (var allocation in chainSpec.Allocations) stateProvider.CreateAccount(allocation.Key, allocation.Value);
@@ -97,7 +108,7 @@ namespace Nethermind.Blockchain.Test
             blockTree.SuggestBlock(chainSpec.Genesis);
             blockchainProcessor.Start();
             
-            MinedBlockProducer minedBlockProducer = new MinedBlockProducer(difficultyCalculator, transactionStore, blockchainProcessor, sealEngine, blockTree, NullLogManager.Instance);
+            MinedBlockProducer minedBlockProducer = new MinedBlockProducer(difficultyCalculator, transactionPool, blockchainProcessor, sealEngine, blockTree, timestamp, NullLogManager.Instance);
             minedBlockProducer.Start();
 
             ManualResetEvent manualResetEvent = new ManualResetEvent(false);
@@ -107,25 +118,39 @@ namespace Nethermind.Blockchain.Test
                 if (args.Block.Number == 6) manualResetEvent.Set();
             };
 
-            manualResetEvent.WaitOne(miningDelay * 12);
-
-            await blockchainProcessor.StopAsync(true).ContinueWith(
-                t =>
-                {
-                    if (t.IsFaulted) throw t.Exception;
-
-                    Assert.GreaterOrEqual((int) blockTree.Head.Number, 6);
-                });
-
-            blockchainProcessor.AddTxData(blockTree.FindBlock(1));
-
-            TxTracer tracer = new TxTracer(blockchainProcessor, transactionStore, blockTree);
-
-            blockchainProcessor.Process(blockTree.FindBlock(1), ProcessingOptions.ForceProcessing | ProcessingOptions.StoreReceipts, NullTraceListener.Instance);
-            Assert.AreNotEqual(0, receiptsDb.Keys.Count, "receipts");
-            TransactionTrace trace = tracer.Trace(blockTree.FindBlock(1).Transactions[0].Hash);
+            manualResetEvent.WaitOne(miningDelay * 12 * timeMultiplier * 1000);
+            await minedBlockProducer.StopAsync();
             
-            Assert.AreSame(TransactionTrace.QuickFail, trace);
+            int previousCount = 0;
+            int totalTx = 0;
+            for (int i = 0; i < 6; i++)
+            {
+                Block block = blockTree.FindBlock(new UInt256(i));
+                Console.WriteLine($"Block {i} with {block.Transactions.Length} txs");
+                
+                ManualResetEvent blockProcessedEvent = new ManualResetEvent(false);
+                blockchainProcessor.ProcessingQueueEmpty += (sender, args) => blockProcessedEvent.Set(); 
+                blockchainProcessor.SuggestBlock(block.Hash, ProcessingOptions.ForceProcessing | ProcessingOptions.StoreReceipts | ProcessingOptions.ReadOnlyChain);
+                blockProcessedEvent.WaitOne(1000);
+                
+                TxTracer tracer = new TxTracer(blockchainProcessor, receiptStorage, blockTree);
+
+                int currentCount = receiptsDb.Keys.Count;
+                Console.WriteLine($"Current count of receipts {currentCount}");
+                Console.WriteLine($"Previous count of receipts {previousCount}");
+                
+                if (block.Transactions.Length > 0)
+                {
+                    TransactionTrace trace = tracer.Trace(block.Transactions[0].Hash);
+                    Assert.AreSame(TransactionTrace.QuickFail, trace);
+                    Assert.AreNotEqual(previousCount, currentCount, $"receipts at block {i}");
+                    totalTx += block.Transactions.Length;
+                }
+                
+                previousCount = currentCount;
+            }
+            
+            Assert.AreNotEqual(0, totalTx, "no tx in blocks");
         }
     }
 }

@@ -32,12 +32,14 @@ namespace Nethermind.Blockchain.Test
     {
         private readonly IBlockTree _blockTree;
 
-        public SynchronizationPeerMock(IBlockTree blockTree)
+        public SynchronizationPeerMock(IBlockTree blockTree, PublicKey publicKey = null)
         {
             _blockTree = blockTree;
+            NodeId = new NodeId(publicKey ?? TestObject.PublicKeyA);
         }
 
-        public NodeId NodeId { get; set; } = new NodeId(TestObject.PublicKeyA);
+        public bool IsFastSyncSupported => false;
+        public NodeId NodeId { get; set; }
         public INodeStats NodeStats { get; set; }
         public string ClientId { get; set; }
 
@@ -72,7 +74,15 @@ namespace Nethermind.Blockchain.Test
             BlockHeader[] result = new BlockHeader[maxBlocks];
             for (int i = 0; i < maxBlocks; i++)
             {
-                result[i] = _blockTree.FindBlock((ulong)firstNumber + (ulong)i + (ulong)skip).Header;
+                ulong blockNumber = (ulong) firstNumber + (ulong) i + (ulong) skip;
+                if (blockNumber > (_blockTree.Head?.Number ?? 0))
+                {
+                    result[i] = null;
+                }
+                else
+                {
+                    result[i] = _blockTree.FindBlock(blockNumber).Header;
+                }
             }
             
             return Task.FromResult(result);
@@ -99,6 +109,35 @@ namespace Nethermind.Blockchain.Test
         }
 
         public void SendNewTransaction(Transaction transaction)
+        {
+        }
+
+        public Task<TransactionReceipt[][]> GetReceipts(Keccak[] blockHash, CancellationToken token)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<TransactionReceipt[][]> GetReceipts(Keccak[] blockHash)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void SendReceipts(TransactionReceipt[][] receipts)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<byte[][]> GetNodeData(Keccak[] hashes, CancellationToken token)
+        {
+            throw new NotImplementedException();
+        }
+
+        public Task<byte[][]> GetNodeData(Keccak[] hashes)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void SendNodeData(byte[][] values)
         {
             throw new NotImplementedException();
         }

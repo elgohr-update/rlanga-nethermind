@@ -18,6 +18,7 @@
 
 using DotNetty.Transport.Channels;
 using Nethermind.Blockchain;
+using Nethermind.Blockchain.TransactionPools;
 using Nethermind.Core;
 using Nethermind.Core.Logging;
 using Nethermind.Core.Model;
@@ -43,7 +44,7 @@ namespace Nethermind.Network.Test.P2P
             IPacketSender sender = Substitute.For<IPacketSender>();
 
             IMessageSerializationService service = Build.A.SerializationService().WithP2P().TestObject;
-            
+
             P2PSession factory = new P2PSession(
                 new NodeId(NetTestVectors.StaticKeyA.PublicKey),
                 new NodeId(NetTestVectors.StaticKeyA.PublicKey),
@@ -53,33 +54,11 @@ namespace Nethermind.Network.Test.P2P
                 Substitute.For<ISynchronizationManager>(),
                 Substitute.For<INodeStatsProvider>(),
                 Substitute.For<INodeStats>(),
-                NullLogManager.Instance, null, null);
+                NullLogManager.Instance, Substitute.For<IChannel>(), Substitute.For<IPerfService>(),
+                Substitute.For<IBlockTree>(), Substitute.For<ITransactionPool>(), Substitute.For<ITimestamp>());
             factory.Init(4, Substitute.For<IChannelHandlerContext>(), sender);
-            
+
             sender.Received().Enqueue(Arg.Is<Packet>(p => p.PacketType == 0 && p.Protocol == "p2p"));
         }
-        
-//        [Test]
-//        public void Can_start_eth_session()
-//        {
-//            P2PSession factory = new P2PSession(Substitute.For<IMessageSerializationService>(), NetTestVectors.StaticKeyA.PublicKey, ListenPort, NullLogger.Instance, Substitute.For<ISynchronizationManager>());
-//            factory.StartSession("p2p", 5, Substitute.For<IPacketSender>(), NetTestVectors.StaticKeyB.PublicKey, 8003);
-//            factory.StartSession("eth", 62, Substitute.For<IPacketSender>(), NetTestVectors.StaticKeyB.PublicKey, 8003);
-//        }
-//        
-//        [TestCase(100, null, 0)]
-//        [TestCase(1, "p2p", 1)]
-//        [TestCase(15, "p2p", 15)]
-//        [TestCase(16, "eth", 0)]
-//        public void Adaptive_message_ids(int dynamicId, string protocolCode, int messageCode)
-//        {        
-//            P2PSession factory = new P2PSession(Substitute.For<IMessageSerializationService>(), NetTestVectors.StaticKeyA.PublicKey, ListenPort, NullLogger.Instance, Substitute.For<ISynchronizationManager>());
-//            factory.StartSession("p2p", 5, Substitute.For<IPacketSender>(), NetTestVectors.StaticKeyB.PublicKey, 8003);
-//            factory.StartSession("eth", 62, Substitute.For<IPacketSender>(), NetTestVectors.StaticKeyB.PublicKey, 8003);
-//
-//            (string resolvedProtocolCode, int resolvedMessageId) = factory.ResolveMessageCode(dynamicId);
-//            Assert.AreEqual(protocolCode, resolvedProtocolCode, "protocol code");
-//            Assert.AreEqual(messageCode, resolvedMessageId, "message code");
-//        }
     }
 }

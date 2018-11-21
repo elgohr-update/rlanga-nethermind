@@ -18,17 +18,13 @@
 
 using System.Collections.Generic;
 using System.Numerics;
-using System.Security;
 using Nethermind.Blockchain.Filters;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Model;
 using Nethermind.Dirichlet.Numerics;
-using Nethermind.Evm;
 using Block = Nethermind.Core.Block;
 using Transaction = Nethermind.Core.Transaction;
 using TransactionReceipt = Nethermind.Core.TransactionReceipt;
-using TransactionTrace = Nethermind.Evm.TransactionTrace;
 
 namespace Nethermind.JsonRpc.Module
 {
@@ -36,38 +32,42 @@ namespace Nethermind.JsonRpc.Module
     {
         IReadOnlyCollection<Address> GetWalletAccounts();
         Signature Sign(Address address, Keccak message);
-        
+
         int GetNetworkId();
         BlockHeader Head { get; }
         BlockHeader BestSuggested { get; }
+        UInt256 BestKnown { get; }
+        bool IsSyncing { get; }
+        
         Block FindBlock(Keccak blockHash, bool mainChainOnly);
         Block FindBlock(UInt256 blockNumber);
         Block RetrieveHeadBlock();
         Block RetrieveGenesisBlock();
 
-        void AddTxData(UInt256 blockNumber);
         (TransactionReceipt Receipt, Transaction Transaction) GetTransaction(Keccak transactionHash);
         Keccak GetBlockHash(Keccak transactionHash);
         Keccak SendTransaction(Transaction transaction);
         TransactionReceipt GetTransactionReceipt(Keccak txHash);
-        TransactionTrace GetTransactionTrace(Keccak transactionHash);
-        TransactionTrace GetTransactionTrace(UInt256 blockNumber, int index);
-        TransactionTrace GetTransactionTrace(Keccak blockHash, int index);
-        BlockTrace GetBlockTrace(Keccak blockHash);
-        BlockTrace GetBlockTrace(UInt256 blockNumber);
         byte[] Call(Block block, Transaction transaction);
-        byte[] GetDbValue(string dbName, byte[] key);
 
         byte[] GetCode(Address address);
         byte[] GetCode(Keccak codeHash);
         BigInteger GetNonce(Address address);
         BigInteger GetBalance(Address address);
         Account GetAccount(Address address, Keccak stateRoot);
-        
+
         int NewBlockFilter();
-        void UninstallFilter(int filterId);
-        object[] GetFilterChanges(int filterId);
         int NewFilter(FilterBlock fromBlock, FilterBlock toBlock, object address = null,
+            IEnumerable<object> topics = null);
+
+        void UninstallFilter(int filterId);
+        bool FilterExists(int filterId);
+        FilterLog[] GetLogFilterChanges(int filterId);
+        Keccak[] GetBlockFilterChanges(int filterId);
+        FilterType GetFilterType(int filterId);
+        FilterLog[] GetFilterLogs(int filterId);
+
+        FilterLog[] GetLogs(FilterBlock fromBlock, FilterBlock toBlock, object address = null,
             IEnumerable<object> topics = null);
     }
 }

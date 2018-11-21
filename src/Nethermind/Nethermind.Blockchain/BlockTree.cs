@@ -17,10 +17,10 @@
  */
 
 using System;
-using System.Linq;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
+using Nethermind.Blockchain.TransactionPools;
 using Nethermind.Blockchain.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
@@ -52,21 +52,21 @@ namespace Nethermind.Blockchain
         private readonly IDb _blockInfoDb;
         private readonly ILogger _logger;
         private readonly ISpecProvider _specProvider;
-        private readonly ITransactionStore _transactionStore;
+        private readonly ITransactionPool _transactionPool;
 
         // TODO: validators should be here
         public BlockTree(
             IDb blockDb,
             IDb blockInfoDb,
             ISpecProvider specProvider,
-            ITransactionStore transactionStore,
+            ITransactionPool transactionPool,
             ILogManager logManager)
         {
             _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
             _blockDb = blockDb;
             _blockInfoDb = blockInfoDb;
             _specProvider = specProvider;
-            _transactionStore = transactionStore;
+            _transactionPool = transactionPool;
 
             ChainLevelInfo genesisLevel = LoadLevel(0);
             if (genesisLevel != null)
@@ -75,7 +75,7 @@ namespace Nethermind.Blockchain
                 {
                     // just for corrupted test bases
                     genesisLevel.BlockInfos = new[] {genesisLevel.BlockInfos[0]};
-                    UpdateLevel(0, genesisLevel);
+                    PersistLevel(0, genesisLevel);
                     //throw new InvalidOperationException($"Genesis level in DB has {genesisLevel.BlockInfos.Length} blocks");
                 }
 
@@ -85,7 +85,41 @@ namespace Nethermind.Blockchain
                     Genesis = genesisBlock.Header;
                     LoadHeadBlock();
                 }
+                
+                LoadBestKnown();
             }
+
+            if (_logger.IsInfo) _logger.Info($"Block tree initialized, last processed is {Head?.ToString(BlockHeader.Format.Short) ?? "0"}, best queued is {BestSuggested?.Number.ToString() ?? "0"}, best known is {BestKnownNumber}");
+        }
+
+        private void LoadBestKnown()
+        {
+            BigInteger headNumber = Head == null ? -1 : (BigInteger) Head.Number;
+            BigInteger left = headNumber;
+            BigInteger right = headNumber + MaxQueueSize;
+
+            while (left != right)
+            {
+                BigInteger index = left + (right - left) / 2;
+                ChainLevelInfo level = LoadLevel(index);
+                if (level == null)
+                {
+                    right = index;
+                }
+                else
+                {
+                    left = index + 1;
+                }
+            }
+
+
+            BigInteger result = left - 1;
+            if (result < 0)
+            {
+                throw new InvalidOperationException($"Bets known is {result}");
+            }
+
+            BestKnownNumber = (UInt256) (result);
         }
 
         public bool CanAcceptNewBlocks { get; private set; } = true; // no need to sync it at the moment
@@ -193,6 +227,7 @@ namespace Nethermind.Blockchain
         public BlockHeader Genesis { get; private set; }
         public BlockHeader Head { get; private set; }
         public BlockHeader BestSuggested { get; private set; }
+        public UInt256 BestKnownNumber { get; private set; }
         public int ChainId => _specProvider.ChainId;
 
         public AddBlockResult SuggestBlock(Block block)
@@ -235,7 +270,7 @@ namespace Nethermind.Blockchain
             SetTotalDifficulty(block);
             SetTotalTransactions(block);
             BlockInfo blockInfo = new BlockInfo(block.Hash, block.TotalDifficulty.Value, block.TotalTransactions.Value);
-            UpdateLevel(block.Number, blockInfo);
+            UpdateOrCreateLevel(block.Number, blockInfo);
 
             if (block.IsGenesis || block.TotalDifficulty > (BestSuggested?.TotalDifficulty ?? 0))
             {
@@ -332,7 +367,7 @@ namespace Nethermind.Blockchain
             BigInteger number = LoadNumberOnly(blockHash);
             ChainLevelInfo level = LoadLevel(number);
             level.HasBlockOnMainChain = false;
-            UpdateLevel(number, level);
+            PersistLevel(number, level);
             if (_logger.IsTrace) _logger.Trace($"{blockHash} moved to branch");
         }
 
@@ -348,7 +383,7 @@ namespace Nethermind.Blockchain
             }
 
             info.WasProcessed = true;
-            UpdateLevel(number, level);
+            PersistLevel(number, level);
             if (_logger.IsTrace) _logger.Trace($"{blockHash} marked as processed");
         }
 
@@ -407,7 +442,7 @@ namespace Nethermind.Blockchain
             //}
 
             level.HasBlockOnMainChain = true;
-            UpdateLevel(block.Number, level);
+            PersistLevel(block.Number, level);
 
             BlockAddedToMain?.Invoke(this, new BlockEventArgs(block));
 
@@ -423,33 +458,17 @@ namespace Nethermind.Blockchain
 
             for (int i = 0; i < block.Transactions.Length; i++)
             {
-                _transactionStore.RemovePending(block.Transactions[i]);
+                _transactionPool.RemoveTransaction(block.Transactions[i].Hash);
             }
-            
+
             if (_logger.IsTrace) _logger.Trace($"Block {block.ToString(Block.Format.Short)} added to main chain");
         }
 
+        [Todo(Improve.Refactor, "Look at this magic -1 behaviour, never liked it, now when it is split between BestKnownNumber and Head it is even worse")]
         private BigInteger FindNumberOfBlocksToLoadFromDb()
         {
             BigInteger headNumber = Head == null ? -1 : (BigInteger) Head.Number;
-            BigInteger left = headNumber;
-            BigInteger right = headNumber + MaxQueueSize;
-
-            while (left != right)
-            {
-                BigInteger index = left + (right - left) / 2;
-                ChainLevelInfo level = LoadLevel(index);
-                if (level == null)
-                {
-                    right = index;
-                }
-                else
-                {
-                    left = index + 1;
-                }
-            }
-
-            return left - headNumber - 1;
+            return BestKnownNumber - headNumber;
         }
 
         private void LoadHeadBlock()
@@ -504,7 +523,7 @@ namespace Nethermind.Blockchain
             }
         }
 
-        private void UpdateLevel(BigInteger number, BlockInfo blockInfo)
+        private void UpdateOrCreateLevel(UInt256 number, BlockInfo blockInfo)
         {
             ChainLevelInfo level = LoadLevel(number);
             if (level != null)
@@ -520,13 +539,18 @@ namespace Nethermind.Blockchain
             }
             else
             {
+                if (number > BestKnownNumber)
+                {
+                    BestKnownNumber = number;
+                }
+
                 level = new ChainLevelInfo(false, new[] {blockInfo});
             }
 
-            UpdateLevel(number, level);
+            PersistLevel(number, level);
         }
 
-        private void UpdateLevel(BigInteger number, ChainLevelInfo level)
+        private void PersistLevel(BigInteger number, ChainLevelInfo level)
         {
             _blockInfoCache.Set(number, level);
             _blockInfoDb.Set(number, Rlp.Encode(level).Bytes);
@@ -658,7 +682,7 @@ namespace Nethermind.Blockchain
                 SetTotalDifficulty(block);
                 SetTotalTransactions(block);
                 blockInfo = new BlockInfo(block.Hash, block.TotalDifficulty.Value, block.TotalTransactions.Value);
-                UpdateLevel(block.Number, blockInfo);
+                UpdateOrCreateLevel(block.Number, blockInfo);
                 (blockInfo, level) = LoadInfo(block.Number, block.Hash);
             }
             else
