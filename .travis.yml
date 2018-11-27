@@ -99,7 +99,7 @@ jobs:
         on:
           branch: master
           tags: true
-          condition: "$TRAVIS_TAG =~ ^[0-9]\.*"
+          condition: $TRAVIS_TAG =~ ^[0-9]\.*
 #    - stage: deploy stable to candidate channel on snap store
 #      deploy:
 #        provider: snap
