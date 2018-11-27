@@ -1,0 +1,26 @@
+#!/bin/bash
+
+mkdir $SNAP_COMMON/logs
+mkdir $SNAP_COMMON/nethermind_db 
+mkdir $SNAP_COMMON/Data  
+mkdir $SNAP_DATA/chainspec
+
+chmod o+x $SNAP_COMMON/logs
+cp -r $SNAP/usr/lib/Nethermind/logs/* $SNAP_COMMON/logs
+chmod 646 $SNAP_COMMON/logs/*
+
+chmod o+x $SNAP_COMMON/nethermind_db
+cp -r $SNAP/usr/lib/Nethermind/nethermind_db/* $SNAP_COMMON/nethermind_db
+chmod 757 $SNAP_COMMON/nethermind_db/*
+for d in $SNAP_COMMON/nethermind_db/*/*/ ; do
+	chmod 757 $d/
+	chmod 646 $d/*
+done
+
+chmod o+x $SNAP_COMMON/Data
+cp -r $SNAP/usr/lib/Nethermind/Data/* $SNAP_COMMON/Data
+chmod 646 $SNAP_COMMON/Data/*
+
+chmod o+x $SNAP_DATA/chainspec
+cp -r $SNAP/usr/lib/Nethermind/chainspec/* $SNAP_DATA/chainspec
+chmod 646 $SNAP_DATA/chainspec/*

@@ -23,99 +23,99 @@ jobs:
     - stage: run tests
       script: dotnet test src/Nethermind/Ethereum.Basic.Test
       name: "Ethereum.Basic.Test"
-    - script: dotnet test src/Nethermind/Ethereum.Blockchain.Block.Test
-      name: "Ethereum.Blockchain.Block.Test"
-    - script: dotnet test src/Nethermind/Ethereum.Blockchain.Test
-      name: "Ethereum.Blockchain.Test"
-    - script: dotnet test src/Nethermind/Ethereum.Difficulty.Test
-      name: "Ethereum.Difficulty.Test"
-    - script: dotnet test src/Nethermind/Ethereum.HexPrefix.Test
-      name: "Ethereum.HexPrefix.Test"
-    - script: dotnet test src/Nethermind/Ethereum.KeyAddress.Test
-      name: "Ethereum.KeyAddress.Test"
-    - script: dotnet test src/Nethermind/Ethereum.PoW.Test
-      name: "Ethereum.PoW.Test"
-    - script: dotnet test src/Nethermind/Ethereum.Rlp.Test
-      name: "Ethereum.Rlp.Test"
-    - script: dotnet test src/Nethermind/Ethereum.Transaction.Test
-      name: "Ethereum.Transaction.Test"
-    - script: dotnet test src/Nethermind/Ethereum.Transition.Test
-      name: "Ethereum.Transition.Test"
-    - script: dotnet test src/Nethermind/Ethereum.Trie.Test
-      name: "Ethereum.Trie.Test"
-    - script: dotnet test src/Nethermind/Ethereum.VM.Test
-      name: "Ethereum.VM.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Abi.Test
-      name: "Nethermind.Abi.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Blockchain.Test
-      name: "Nethermind.Blockchain.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Clique.Test
-      name: "Nethermind.Clique.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Config.Test
-      name: "Nethermind.Config.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Core.Test
-      name: "Nethermind.Core.Test"
-    - script: dotnet test src/Nethermind/Nethermind.DataStreams.Test
-      name: "Nethermind.DataStreams.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.Blockchain.Block.Test
+#      name: "Ethereum.Blockchain.Block.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.Blockchain.Test
+#      name: "Ethereum.Blockchain.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.Difficulty.Test
+#      name: "Ethereum.Difficulty.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.HexPrefix.Test
+#      name: "Ethereum.HexPrefix.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.KeyAddress.Test
+#      name: "Ethereum.KeyAddress.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.PoW.Test
+#      name: "Ethereum.PoW.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.Rlp.Test
+#      name: "Ethereum.Rlp.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.Transaction.Test
+#      name: "Ethereum.Transaction.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.Transition.Test
+#      name: "Ethereum.Transition.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.Trie.Test
+#      name: "Ethereum.Trie.Test"
+#    - script: dotnet test src/Nethermind/Ethereum.VM.Test
+#      name: "Ethereum.VM.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Abi.Test
+#      name: "Nethermind.Abi.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Blockchain.Test
+#      name: "Nethermind.Blockchain.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Clique.Test
+#      name: "Nethermind.Clique.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Config.Test
+#      name: "Nethermind.Config.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Core.Test
+#      name: "Nethermind.Core.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.DataStreams.Test
+#      name: "Nethermind.DataStreams.Test"
     #- script: dotnet test src/Nethermind/Nethermind.Db.Test
     #  name: "Nethermind.Db.Test.Linux"
     #- script: dotnet test src/Nethermind/Nethermind.Db.Test
     #  name: "Nethermind.Db.Test.Osx"
 #      os: osx
-    - script: dotnet test src/Nethermind/Nethermind.Evm.Test
-      name: "Nethermind.Evm.Test"
-    - script: dotnet test src/Nethermind/Nethermind.JsonRpc.Test
-      name: "Nethermind.JsonRpc.Test"
-    - script: dotnet test src/Nethermind/Nethermind.KeyStore.Test
-      name: "Nethermind.KeyStore.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Solc.Test
-      name: "Nethermind.Solc.Test.Linux"
-    - script: dotnet test src/Nethermind/Nethermind.Solc.Test
-      name: "Nethermind.Solc.Test.Osx"
-      os: osx
-    - script: dotnet test src/Nethermind/Nethermind.Mining.Test
-      name: "Nethermind.Mining.Test"
-    - script:
-      - sudo apt-get install libsnappy-dev 
-      - dotnet test src/Nethermind/Nethermind.Network.Test
-      name: "Nethermind.Network.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Runner.Test
-      name: "Nethermind.Runner.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Secp256k1.Test
-      name: "Nethermind.Secp256k1.Test.Linux"
-    - script: dotnet test src/Nethermind/Nethermind.Secp256k1.Test
-      name: "Nethermind.Secp256k1.Test.Osx"
-      os: osx
-    - script: dotnet test src/Nethermind/Nethermind.Store.Test
-      name: "Nethermind.Store.Test"
-    - script: dotnet test src/Nethermind/Nethermind.Wallet.Test
-      name: "Nethermind.Wallet.Test"
-#    - stage: deploy release version to snap store
-#      deploy:
-#        provider: snap
-#        snap: nethermind
-#        channel: stable
-#        skip_cleanup: true
-#        on:
-#          branch: master
-#          tags: true
-#          condition: "$TRAVIS_TAG =~ ^v.*$"
+#    - script: dotnet test src/Nethermind/Nethermind.Evm.Test
+#      name: "Nethermind.Evm.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.JsonRpc.Test
+#      name: "Nethermind.JsonRpc.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.KeyStore.Test
+#      name: "Nethermind.KeyStore.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Solc.Test
+#      name: "Nethermind.Solc.Test.Linux"
+#    - script: dotnet test src/Nethermind/Nethermind.Solc.Test
+#      name: "Nethermind.Solc.Test.Osx"
+#      os: osx
+#    - script: dotnet test src/Nethermind/Nethermind.Mining.Test
+#      name: "Nethermind.Mining.Test"
+#    - script:
+#      - sudo apt-get install libsnappy-dev 
+#      - dotnet test src/Nethermind/Nethermind.Network.Test
+#      name: "Nethermind.Network.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Runner.Test
+#      name: "Nethermind.Runner.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Secp256k1.Test
+#      name: "Nethermind.Secp256k1.Test.Linux"
+#    - script: dotnet test src/Nethermind/Nethermind.Secp256k1.Test
+#      name: "Nethermind.Secp256k1.Test.Osx"
+#      os: osx
+#    - script: dotnet test src/Nethermind/Nethermind.Store.Test
+#      name: "Nethermind.Store.Test"
+#    - script: dotnet test src/Nethermind/Nethermind.Wallet.Test
+#      name: "Nethermind.Wallet.Test"
+    - stage: deploy release version to snap store
+      deploy:
+        provider: snap
+        snap: nethtest
+        channel: stable
+        skip_cleanup: true
+        on:
+          branch: master
+          tags: true
+          condition: "$TRAVIS_TAG =~ ^[0-9]\.*"
 #    - stage: deploy stable to candidate channel on snap store
 #      deploy:
 #        provider: snap
-#        snap: nethermind
+#        snap: nethtest
 #        channel: beta
 #        skip_cleanup: true
 #        on:
 #          branch: master
 #          tags: true
 #          condition: "$TRAVIS_TAG =~ ^stable_*$"
-    # - stage: deploy to edge channel on snap store
-    #   deploy:
-    #     provider: snap
-    #     snap: nethermind
-    #     channel: edge
-    #     skip_cleanup: true
-    #     on:
-    #       branch: master
-    #       tags: false
+#     - stage: deploy to edge channel on snap store
+#       deploy:
+#         provider: snap
+#         snap: nethtest
+#         channel: edge
+#         skip_cleanup: true
+#         on:
+#           branch: master
+#           tags: false

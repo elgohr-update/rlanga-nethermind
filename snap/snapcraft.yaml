@@ -1,0 +1,40 @@
+name: nethtest
+version: 0.0 #mandatory but will be ignored due to version-script being used
+version-script: git describe --tags | awk '{ gsub("_","-",$0); print $1 }'
+summary: Full .NET Core Ethereum client
+description: | 
+ At Nethermind we are building an Open Source multi-platform Ethereum client
+ implementation in .NET Core (running seamlessly on Linux, Windows and MacOS).
+
+ Simultaneously our team works on Nethermind trading tools, analytics and
+ decentralized exchange (0x relay).
+
+confinement: strict
+icon: Nethermind.png
+architectures: [amd64]
+grade: stable
+
+parts:
+  nethtest:
+    plugin: dump
+    source: src/Nethermind/Nethermind.Runner/bin/out
+    stage-packages:
+      - libsnappy-dev
+      - libc6-dev
+      - libicu55
+    override-build: |
+      chmod +x Nethermind.Runner
+      mkdir $SNAPCRAFT_PART_INSTALL/usr/lib/Nethermind/
+      cp -r * $SNAPCRAFT_PART_INSTALL/usr/lib/Nethermind/
+      cp nethermind-runner-wrapper.sh $SNAPCRAFT_PART_INSTALL/usr/bin
+      cd $SNAPCRAFT_PART_INSTALL/usr/bin
+      ln -s ../lib/Nethermind/Nethermind.Runner Nethermind.Runner
+
+apps:
+  nethtest:
+    command: nethermind-runner-wrapper.sh
+    plugs: [network, network-bind, network-observe]
+
+hooks:
+  install:
+    plugs: []
