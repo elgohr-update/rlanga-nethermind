@@ -85,7 +85,7 @@ namespace Ethereum.Test.Base
                 Bytes.FromHexString(headerJson.ExtraData)
             );
 
-            header.Bloom = new Bloom(Bytes.FromHexString(headerJson.Bloom).ToBigEndianBitArray2048());
+            header.Bloom = new Bloom(Bytes.FromHexString(headerJson.Bloom).AsSpan().ToBigEndianBitArray2048());
             header.GasUsed = (long) Bytes.FromHexString(headerJson.GasUsed).ToUnsignedBigInteger();
             header.Hash = new Keccak(headerJson.Hash);
             header.MixHash = new Keccak(headerJson.MixHash);
@@ -215,7 +215,8 @@ namespace Ethereum.Test.Base
             }
             else
             {
-                test.PostState = testJson.PostState.ToDictionary(p => new Address(p.Key), p => Convert(p.Value));
+                test.PostState = testJson.PostState?.ToDictionary(p => new Address(p.Key), p => Convert(p.Value));
+                test.PostStateRoot = testJson.PostStateHash;
             }
             
             return test;

@@ -19,7 +19,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
 using Nethermind.Blockchain.Filters;
@@ -127,14 +126,14 @@ namespace Nethermind.JsonRpc.Modules.Eth
             return Task.FromResult(ResultWrapper<long?>.Success(number));
         }
 
-        public Task<ResultWrapper<UInt256?>> eth_getBalance(Address address, BlockParameter blockParameter)
+        public Task<ResultWrapper<UInt256?>> eth_getBalance(Address address, BlockParameter blockParameter = null)
         {
             if (_blockchainBridge.Head == null)
             {
                 return Task.FromResult(ResultWrapper<UInt256?>.Fail("Incorrect head block", ErrorType.InternalError, null));
             }
 
-            var result = GetAccountBalance(address, blockParameter);
+            var result = GetAccountBalance(address, blockParameter ?? BlockParameter.Latest);
             if (result.Result.ResultType == ResultType.Failure)
             {
                 return Task.FromResult(ResultWrapper<UInt256?>.Fail($"Could not find balance of {address} at {blockParameter}", ErrorType.InternalError, null));
@@ -143,20 +142,14 @@ namespace Nethermind.JsonRpc.Modules.Eth
             return Task.FromResult(result);
         }
 
-        public ResultWrapper<byte[]> eth_getStorageAt(Address address, UInt256 positionIndex, BlockParameter blockParameter)
+        public ResultWrapper<byte[]> eth_getStorageAt(Address address, UInt256 positionIndex, BlockParameter blockParameter = null)
         {
             if (_blockchainBridge.Head == null)
             {
                 return ResultWrapper<byte[]>.Fail($"Incorrect head block: {(_blockchainBridge.Head != null ? "HeadBlock is null" : "HeadBlock header is null")}");
             }
 
-            var result = GetStorage(address, positionIndex, blockParameter);
-            if (result.Result.ResultType == ResultType.Failure)
-            {
-                return result;
-            }
-
-            return result;
+            return GetStorage(address, positionIndex, blockParameter ?? BlockParameter.Latest);
         }
 
         public ResultWrapper<UInt256?> eth_getTransactionCount(Address address, BlockParameter blockParameter)
@@ -166,13 +159,7 @@ namespace Nethermind.JsonRpc.Modules.Eth
                 return ResultWrapper<UInt256?>.Fail($"Incorrect head block", ErrorType.InternalError, null);
             }
 
-            var result = GetAccountNonce(address, blockParameter);
-            if (result.Result.ResultType == ResultType.Failure)
-            {
-                return result;
-            }
-
-            return result;
+            return GetAccountNonce(address, blockParameter ?? BlockParameter.Latest);
         }
 
         public ResultWrapper<UInt256?> eth_getBlockTransactionCountByHash(Keccak blockHash)
@@ -232,19 +219,14 @@ namespace Nethermind.JsonRpc.Modules.Eth
             return ommersCount;
         }
 
-        public void ResetState()
-        {
-            throw new NotImplementedException();
-        }
-
-        public ResultWrapper<byte[]> eth_getCode(Address address, BlockParameter blockParameter)
+        public ResultWrapper<byte[]> eth_getCode(Address address, BlockParameter blockParameter = null)
         {
             if (_blockchainBridge.Head == null)
             {
                 return ResultWrapper<byte[]>.Fail($"Incorrect head block: {(_blockchainBridge.Head != null ? "HeadBlock is null" : "HeadBlock header is null")}");
             }
 
-            var result = GetAccountCode(address, blockParameter);
+            var result = GetAccountCode(address, blockParameter ?? BlockParameter.Latest);
             if (result.Result.ResultType == ResultType.Failure)
             {
                 return result;
@@ -275,7 +257,7 @@ namespace Nethermind.JsonRpc.Modules.Eth
             return ResultWrapper<byte[]>.Success(sig.Bytes);
         }
 
-        public ResultWrapper<Keccak> eth_sendTransaction(TransactionForRpc transactionForRpc)
+        public Task<ResultWrapper<Keccak>> eth_sendTransaction(TransactionForRpc transactionForRpc)
         {
             Transaction tx = transactionForRpc.ToTransaction();
             if (tx.Signature == null)
@@ -285,40 +267,35 @@ namespace Nethermind.JsonRpc.Modules.Eth
             }
 
             Keccak txHash = _blockchainBridge.SendTransaction(tx, true);
-            return ResultWrapper<Keccak>.Success(txHash);
+            return Task.FromResult(ResultWrapper<Keccak>.Success(txHash));
         }
 
-        public ResultWrapper<Keccak> eth_sendRawTransaction(byte[] transaction)
+        public Task<ResultWrapper<Keccak>> eth_sendRawTransaction(byte[] transaction)
         {
             Transaction tx = Rlp.Decode<Transaction>(transaction);
             Keccak txHash = _blockchainBridge.SendTransaction(tx, true);
-            return ResultWrapper<Keccak>.Success(txHash);
+            return Task.FromResult(ResultWrapper<Keccak>.Success(txHash));
         }
 
-        public ResultWrapper<byte[]> eth_call(TransactionForRpc transactionCall, BlockParameter blockParameter = null)
+        public ResultWrapper<string> eth_call(TransactionForRpc transactionCall, BlockParameter blockParameter = null)
         {
-            BlockHeader block = blockParameter == null ? _blockchainBridge.Head : _blockchainBridge.GetBlock(blockParameter).Header;
+            BlockHeader block = _blockchainBridge.GetHeader(blockParameter ?? BlockParameter.Latest);
 
             var tx = transactionCall.ToTransaction();
             tx.GasPrice = 0;
             if (tx.GasLimit < 21000)
             {
-                tx.GasLimit = 10000000;    
-            }
-
-            if (tx.To == null)
-            {
-                return ResultWrapper<byte[]>.Fail($"Recipient address not specified on the transaction.", ErrorType.InvalidParams);
+                tx.GasLimit = 10000000;
             }
             
             BlockchainBridge.CallOutput result = _blockchainBridge.Call(block, tx);
 
             if (result.Error != null)
             {
-                return ResultWrapper<byte[]>.Fail($"VM Exception while processing transaction: {result.Error}", ErrorType.ExecutionError, result.OutputData);
+                return ResultWrapper<string>.Fail("VM execution error.", ErrorType.ExecutionError, result.Error);
             }
 
-            return ResultWrapper<byte[]>.Success(result.OutputData);
+            return ResultWrapper<string>.Success(result.OutputData.ToHexString(true));
         }
 
         public ResultWrapper<UInt256?> eth_estimateGas(TransactionForRpc transactionCall)
@@ -436,17 +413,17 @@ namespace Nethermind.JsonRpc.Modules.Eth
             return ResultWrapper<TransactionForRpc>.Success(transactionModel);
         }
 
-        public ResultWrapper<ReceiptForRpc> eth_getTransactionReceipt(Keccak txHash)
+        public Task<ResultWrapper<ReceiptForRpc>> eth_getTransactionReceipt(Keccak txHash)
         {
             var receipt = _blockchainBridge.GetReceipt(txHash);
             if (receipt == null)
             {
-                return ResultWrapper<ReceiptForRpc>.Success(null);
+                return Task.FromResult(ResultWrapper<ReceiptForRpc>.Success(null));
             }
 
             var receiptModel = new ReceiptForRpc(txHash, receipt);
             if (_logger.IsTrace) _logger.Trace($"eth_getTransactionReceipt request {txHash}, result: {txHash}");
-            return ResultWrapper<ReceiptForRpc>.Success(receiptModel);
+            return Task.FromResult(ResultWrapper<ReceiptForRpc>.Success(receiptModel));
         }
 
         public ResultWrapper<BlockForRpc> eth_getUncleByBlockHashAndIndex(Keccak blockHashData, UInt256 positionIndex)
@@ -609,10 +586,10 @@ namespace Nethermind.JsonRpc.Modules.Eth
         // https://github.com/ethereum/EIPs/issues/1186	
         public ResultWrapper<AccountProof> eth_getProof(Address accountAddress, byte[][] storageKeys, BlockParameter blockParameter)	
         {	
-            Block block;	
+            BlockHeader header;	
             try	
             {	
-                block = _blockchainBridge.GetBlock(blockParameter);	
+                header = _blockchainBridge.GetHeader(blockParameter);	
             }	
             catch (JsonRpcException ex)	
             {	
@@ -620,7 +597,7 @@ namespace Nethermind.JsonRpc.Modules.Eth
             }	
 
             ProofCollector proofCollector = new ProofCollector(accountAddress, storageKeys);	
-            _blockchainBridge.RunTreeVisitor(proofCollector, block.StateRoot);	
+            _blockchainBridge.RunTreeVisitor(proofCollector, header.StateRoot);	
 
             return ResultWrapper<AccountProof>.Success(proofCollector.BuildResult());	
         }	
@@ -641,12 +618,12 @@ namespace Nethermind.JsonRpc.Modules.Eth
             return ResultWrapper<UInt256?>.Success((UInt256)block.Ommers.Length);
         }
 
-        private ResultWrapper<UInt256?> GetTransactionCount(BlockParameter blockParameter)
+        private ResultWrapper<UInt256?> GetTransactionCount(BlockParameter blockParameter = null)
         {
             Block block;
             try
             {
-                block = _blockchainBridge.GetBlock(blockParameter);
+                block = _blockchainBridge.GetBlock(blockParameter ?? BlockParameter.Latest);
             }
             catch (JsonRpcException ex)
             {
@@ -676,17 +653,17 @@ namespace Nethermind.JsonRpc.Modules.Eth
                 blockParameter.Type = BlockParameterType.Latest;
             }
 
-            Block block;
+            BlockHeader header;
             try
             {
-                block = _blockchainBridge.GetBlock(blockParameter);
+                header = _blockchainBridge.GetHeader(blockParameter);
             }
             catch (JsonRpcException ex)
             {
                 return ResultWrapper<byte[]>.Fail(ex.Message, ex.ErrorType, null);
             }
 
-            return GetAccountCode(address, block.StateRoot);
+            return GetAccountCode(address, header.StateRoot);
         }
 
         private ResultWrapper<UInt256?> GetAccountNonce(Address address, BlockParameter blockParameter)
@@ -696,22 +673,22 @@ namespace Nethermind.JsonRpc.Modules.Eth
                 blockParameter.Type = BlockParameterType.Latest;
             }
 
-            Block block;
+            BlockHeader header;
             try
             {
-                block = _blockchainBridge.GetBlock(blockParameter);
+                header = _blockchainBridge.GetHeader(blockParameter);
             }
             catch (JsonRpcException ex)
             {
                 return ResultWrapper<UInt256?>.Fail(ex.Message, ex.ErrorType, null);
             }
 
-            if (block == null)
+            if (header == null)
             {
                 return ResultWrapper<UInt256?>.Fail("Block not found", ErrorType.NotFound, null);
             }
 
-            Account account = _blockchainBridge.GetAccount(address, block.StateRoot);
+            Account account = _blockchainBridge.GetAccount(address, header.StateRoot);
             return ResultWrapper<UInt256?>.Success(account?.Nonce ?? 0);
         }
 
@@ -722,17 +699,17 @@ namespace Nethermind.JsonRpc.Modules.Eth
                 blockParameter.Type = BlockParameterType.Latest;
             }
 
-            Block block;
+            BlockHeader header;
             try
             {
-                block = _blockchainBridge.GetBlock(blockParameter);
+                header = _blockchainBridge.GetHeader(blockParameter);
             }
             catch (JsonRpcException ex)
             {
                 return ResultWrapper<UInt256?>.Fail(ex.Message, ex.ErrorType, null);
             }
 
-            return GetAccountBalance(address, block.StateRoot);
+            return GetAccountBalance(address, header.StateRoot);
         }
 
         private ResultWrapper<byte[]> GetStorage(Address address, UInt256 index, BlockParameter blockParameter)
@@ -742,17 +719,17 @@ namespace Nethermind.JsonRpc.Modules.Eth
                 blockParameter.Type = BlockParameterType.Latest;
             }
 
-            Block block;
+            BlockHeader header;
             try
             {
-                block = _blockchainBridge.GetBlock(blockParameter);
+                header = _blockchainBridge.GetHeader(blockParameter);
             }
             catch (JsonRpcException ex)
             {
                 return ResultWrapper<byte[]>.Fail(ex.Message, ex.ErrorType, null);
             }
 
-            return GetAccountStorage(address, index, block.StateRoot);
+            return GetAccountStorage(address, index, header.StateRoot);
         }
 
         private ResultWrapper<byte[]> GetAccountStorage(Address address, UInt256 index, Keccak stateRoot)

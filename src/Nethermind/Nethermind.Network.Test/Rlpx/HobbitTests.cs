@@ -24,6 +24,7 @@ using DotNetty.Common.Internal.Logging;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Embedded;
 using Microsoft.Extensions.Logging.Console;
+using Microsoft.Extensions.Options;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
@@ -33,6 +34,7 @@ using Nethermind.Network.P2P.Subprotocols.Eth;
 using Nethermind.Network.P2P.Subprotocols.Eth.V63;
 using Nethermind.Network.Rlpx;
 using NUnit.Framework;
+using LogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace Nethermind.Network.Test.Rlpx
 {
@@ -134,7 +136,7 @@ namespace Nethermind.Network.Test.Rlpx
             Packet decoded = Run(packet, inbound, outbound, framingEnabled);
 
             GetReceiptsMessage decodedMessage = serializer.Deserialize(decoded.Data);
-            Assert.AreEqual(message.BlockHashes.Length, decodedMessage.BlockHashes.Length);
+            Assert.AreEqual(message.BlockHashes.Count, decodedMessage.BlockHashes.Count);
         }
         
         [TestCase(StackType.Zero, StackType.Zero, true)]
@@ -202,10 +204,15 @@ namespace Nethermind.Network.Test.Rlpx
 
             return packet;
         }
-
+        
         private EmbeddedChannel BuildEmbeddedChannel(StackType inbound, StackType outbound, bool framingEnabled = true)
         {
-            InternalLoggerFactory.DefaultFactory.AddProvider(new ConsoleLoggerProvider((s, level) => level > Microsoft.Extensions.Logging.LogLevel.Warning, false));
+            InternalLoggerFactory.DefaultFactory.AddProvider(new ConsoleLoggerProvider(new ConsoleLoggerOptionsMonitor(
+                new ConsoleLoggerOptions
+                {
+                    Format = ConsoleLoggerFormat.Default,
+                    LogToStandardErrorThreshold = LogLevel.Warning
+                })));
             ResourceLeakDetector.Level = ResourceLeakDetector.DetectionLevel.Paranoid;
             IChannelHandler decoder = inbound == StackType.Zero
                 ? new ZeroFrameDecoder(_frameCipherB, _macProcessorB, LimboLogs.Instance)
@@ -243,6 +250,30 @@ namespace Nethermind.Network.Test.Rlpx
         public enum StackType
         {
             Zero
+        }
+        
+        private class ConsoleLoggerOptionsMonitor : IOptionsMonitor<ConsoleLoggerOptions>
+        {
+            public ConsoleLoggerOptionsMonitor(ConsoleLoggerOptions currentValue)
+            {
+                CurrentValue = currentValue;
+            }
+
+            public ConsoleLoggerOptions CurrentValue { get; }
+            
+            public ConsoleLoggerOptions Get(string name) => CurrentValue;
+
+            public IDisposable OnChange(Action<ConsoleLoggerOptions, string> listener)
+            {
+                return new Empty();
+            }
+
+            private class Empty : IDisposable
+            {
+                public void Dispose()
+                {
+                }
+            }
         }
     }
 }

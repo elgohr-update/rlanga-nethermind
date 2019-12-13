@@ -64,14 +64,19 @@ namespace Nethermind.DataMarketplace.Infrastructure.Rlp
             var filesPath = rlpStream.DecodeString();
             var fileMaxSize = rlpStream.DecodeUlong();
             var pluginsPath = rlpStream.DecodeString();
+            var databasePath = rlpStream.DecodeString();
             var proxyEnabled = rlpStream.DecodeBool();
             var jsonRpcUrlProxies = rlpStream.DecodeArray(c => c.DecodeString());
+            var gasPriceType = rlpStream.DecodeString();
+            var gasPrice = rlpStream.DecodeUInt256();
+            var cancelTransactionGasPricePercentageMultiplier = rlpStream.DecodeUInt();
+            var jsonRpcDataChannelEnabled = rlpStream.DecodeBool();
 
             return new NdmConfig
             {
                 Enabled = enabled,
                 Id = id,
-                InitializerName =  initializerName,
+                InitializerName = initializerName,
                 StoreConfigInDatabase = storeConfigInDatabase,
                 VerifyP2PSignature = verifyP2PSignature,
                 Persistence = persistence,
@@ -92,8 +97,13 @@ namespace Nethermind.DataMarketplace.Infrastructure.Rlp
                 FilesPath = filesPath,
                 FileMaxSize = fileMaxSize,
                 PluginsPath = pluginsPath,
+                DatabasePath = databasePath,
                 ProxyEnabled = proxyEnabled,
-                JsonRpcUrlProxies = jsonRpcUrlProxies
+                JsonRpcUrlProxies = jsonRpcUrlProxies,
+                GasPriceType = gasPriceType,
+                GasPrice = gasPrice,
+                CancelTransactionGasPricePercentageMultiplier = cancelTransactionGasPricePercentageMultiplier,
+                JsonRpcDataChannelEnabled = jsonRpcDataChannelEnabled
             };
         }
 
@@ -128,8 +138,13 @@ namespace Nethermind.DataMarketplace.Infrastructure.Rlp
                 Nethermind.Core.Encoding.Rlp.Encode(item.FilesPath),
                 Nethermind.Core.Encoding.Rlp.Encode(item.FileMaxSize),
                 Nethermind.Core.Encoding.Rlp.Encode(item.PluginsPath),
+                Nethermind.Core.Encoding.Rlp.Encode(item.DatabasePath),
                 Nethermind.Core.Encoding.Rlp.Encode(item.ProxyEnabled),
-                Nethermind.Core.Encoding.Rlp.Encode(item.JsonRpcUrlProxies));
+                Nethermind.Core.Encoding.Rlp.Encode(item.JsonRpcUrlProxies),
+                Nethermind.Core.Encoding.Rlp.Encode(item.GasPriceType),
+                Nethermind.Core.Encoding.Rlp.Encode(item.GasPrice),
+                Nethermind.Core.Encoding.Rlp.Encode(item.CancelTransactionGasPricePercentageMultiplier),
+                Nethermind.Core.Encoding.Rlp.Encode(item.JsonRpcDataChannelEnabled));
         }
 
         public void Encode(MemoryStream stream, NdmConfig item, RlpBehaviors rlpBehaviors = RlpBehaviors.None)

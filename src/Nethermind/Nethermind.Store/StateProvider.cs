@@ -27,14 +27,14 @@ using Nethermind.Dirichlet.Numerics;
 using Nethermind.Logging;
 
 [assembly: InternalsVisibleTo("Nethermind.Store.Test")]
-[assembly: InternalsVisibleTo("Nethermind.Benchmarks")]
+[assembly: InternalsVisibleTo("Nethermind.Benchmark")]
 [assembly: InternalsVisibleTo("Nethermind.Blockchain.Test")]
 
 namespace Nethermind.Store
 {
     public class StateProvider : IStateProvider
     {
-        private const int StartCapacity = 64;
+        private const int StartCapacity = Resettable.StartCapacity;
         private ResettableDictionary<Address, Stack<int>> _intraBlockCache = new ResettableDictionary<Address, Stack<int>>();
         private ResettableHashSet<Address> _committedThisRound = new ResettableHashSet<Address>();
 
@@ -60,7 +60,7 @@ namespace Nethermind.Store
         public string DumpState()
         {
             TreeDumper dumper = new TreeDumper();
-            _tree.Accept(dumper, _codeDb);
+            _tree.Accept(dumper, _codeDb, _tree.RootHash);
             return dumper.ToString();
         }
 
@@ -68,7 +68,7 @@ namespace Nethermind.Store
         public TrieStats CollectStats()
         {
             TrieStatsCollector collector = new TrieStatsCollector(_logManager);
-            _tree.Accept(collector, _codeDb);
+            _tree.Accept(collector, _codeDb, _tree.RootHash);
             return collector.Stats;
         }
 
@@ -147,25 +147,32 @@ namespace Nethermind.Store
 
         private void SetNewBalance(Address address, in UInt256 balanceChange, IReleaseSpec releaseSpec, bool isSubtracting)
         {
+            Account GetThroughCacheCheckExists()
+            {
+                Account result = GetThroughCache(address);
+                if (result == null)
+                {
+                    if (_logger.IsError) _logger.Error("Updating balance of a non-existing account");
+                    throw new InvalidOperationException("Updating balance of a non-existing account");
+                }
+
+                return result;
+            }
+            
             var isZero = balanceChange.IsZero;
             if (isZero)
             {
                 if (releaseSpec.IsEip158Enabled)
                 {
+                    Account touched = GetThroughCacheCheckExists();
                     if (_logger.IsTrace) _logger.Trace($"  Touch {address} (balance)");
-                    Account touched = GetThroughCache(address);
                     PushTouch(address, touched, releaseSpec, isZero);
                 }
 
                 return;
             }
 
-            Account account = GetThroughCache(address);
-            if (account == null)
-            {
-                if (_logger.IsError) _logger.Error("Updating balance of a non-existing account");
-                throw new InvalidOperationException("Updating balance of a non-existing account");
-            }
+            Account account = GetThroughCacheCheckExists();
 
             if (isSubtracting && account.Balance < balanceChange)
             {
@@ -383,6 +390,11 @@ namespace Nethermind.Store
             for (int i = 0; i <= _currentPosition; i++)
             {
                 Change change = _changes[_currentPosition - i];
+                if (!isTracing && change.ChangeType == ChangeType.JustCache)
+                {
+                    continue;
+                }
+                
                 if (_committedThisRound.Contains(change.Address))
                 {
                     if (isTracing && change.ChangeType == ChangeType.JustCache)
@@ -474,9 +486,8 @@ namespace Nethermind.Store
                         throw new ArgumentOutOfRangeException();
                 }
             }
-
-            _currentPosition = -1;
-            Resettable.Reset(ref _changes, ref _capacity, StartCapacity);
+            
+            Resettable<Change>.Reset(ref _changes, ref _capacity, ref _currentPosition, StartCapacity);
             _committedThisRound.Reset();
             _intraBlockCache.Reset();
 
@@ -535,21 +546,13 @@ namespace Nethermind.Store
 
         private Account GetState(Address address)
         {
-            //Account cached = _longTermCache.Get(address);
-            //if (cached != null)
-            //{
-            //    return cached;
-            //}
-
             Metrics.StateTreeReads++;
             Account account = _tree.Get(address);
-            //_longTermCache.Set(address, account);
             return account;
         }
 
         private void SetState(Address address, Account account)
         {
-            //_longTermCache.Set(address, account);
             Metrics.StateTreeWrites++;
             _tree.Set(address, account);
         }
@@ -600,7 +603,7 @@ namespace Nethermind.Store
         private void Push(ChangeType changeType, Address address, Account touchedAccount)
         {
             SetupCache(address);
-            IncrementPosition();
+            IncrementChangePosition();
             _intraBlockCache[address].Push(_currentPosition);
             _changes[_currentPosition] = new Change(changeType, address, touchedAccount);
         }
@@ -608,19 +611,14 @@ namespace Nethermind.Store
         private void PushNew(Address address, Account account)
         {
             SetupCache(address);
-            IncrementPosition();
+            IncrementChangePosition();
             _intraBlockCache[address].Push(_currentPosition);
             _changes[_currentPosition] = new Change(ChangeType.New, address, account);
         }
 
-        private void IncrementPosition()
+        private void IncrementChangePosition()
         {
-            _currentPosition++;
-            if (_currentPosition >= _capacity - 1) // sometimes we ask about the _currentPosition + 1;
-            {
-                _capacity *= 2;
-                Array.Resize(ref _changes, _capacity);
-            }
+            Resettable<Change>.IncrementPosition(ref _changes, ref _capacity, ref _currentPosition);
         }
 
         private void SetupCache(Address address)

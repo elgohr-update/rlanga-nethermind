@@ -393,7 +393,7 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
             private readonly StateDb _stateDb;
             private readonly StateDb _codeDb;
 
-            public ExecutorMock(StateDb stateDb, StateDb codeDb, Func<Keccak[], Task<byte[][]>> executorResultFunction = null)
+            public ExecutorMock(StateDb stateDb, StateDb codeDb, Func<IList<Keccak>, Task<byte[][]>> executorResultFunction = null)
             {
                 _stateDb = stateDb;
                 _codeDb = codeDb;
@@ -412,9 +412,9 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
                 _filter = availableHashes;
             }
 
-            public static Func<Keccak[], Task<byte[][]>> NotPreimage = request =>
+            public static Func<IList<Keccak>, Task<byte[][]>> NotPreimage = request =>
             {
-                byte[][] result = new byte[request.Length][];
+                byte[][] result = new byte[request.Count][];
 
                 int i = 0;
                 foreach (Keccak _ in request)
@@ -425,9 +425,9 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
                 return Task.FromResult(result);
             };
 
-            public static Func<Keccak[], Task<byte[][]>> EmptyArraysInResponses = request =>
+            public static Func<IList<Keccak>, Task<byte[][]>> EmptyArraysInResponses = request =>
             {
-                byte[][] result = new byte[request.Length][];
+                byte[][] result = new byte[request.Count][];
 
                 int i = 0;
                 foreach (Keccak _ in request)
@@ -438,7 +438,7 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
                 return Task.FromResult(result);
             };
 
-            private Func<Keccak[], Task<byte[][]>> _executorResultFunction;
+            private Func<IList<Keccak>, Task<byte[][]>> _executorResultFunction;
 
             public Guid SessionId { get; }
             public bool IsFastSyncSupported { get; }
@@ -451,7 +451,7 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
                 throw new NotImplementedException();
             }
 
-            public Task<BlockBody[]> GetBlocks(Keccak[] blockHashes, CancellationToken token)
+            public Task<BlockBody[]> GetBlocks(IList<Keccak> blockHashes, CancellationToken token)
             {
                 throw new NotImplementedException();
             }
@@ -481,19 +481,19 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
                 throw new NotImplementedException();
             }
 
-            public Task<TxReceipt[][]> GetReceipts(Keccak[] blockHash, CancellationToken token)
+            public Task<TxReceipt[][]> GetReceipts(IList<Keccak> blockHash, CancellationToken token)
             {
                 throw new NotImplementedException();
             }
 
-            public Task<byte[][]> GetNodeData(Keccak[] hashes, CancellationToken token)
+            public Task<byte[][]> GetNodeData(IList<Keccak> hashes, CancellationToken token)
             {
                 if (_executorResultFunction != null)
                 {
                     return _executorResultFunction(hashes);
                 }
                 
-                byte[][] responses = new byte[hashes.Length][];
+                byte[][] responses = new byte[hashes.Count][];
 
                 int i = 0;
                 foreach (Keccak item in hashes)
@@ -901,6 +901,7 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
         }
 
         [Test]
+        [Retry(3)]
         public async Task Silences_when_peer_sends_empty_byte_arrays()
         {
             ExecutorMock mock = new ExecutorMock(_remoteStateDb, _remoteCodeDb, ExecutorMock.EmptyArraysInResponses);
@@ -916,12 +917,12 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
 
             if (!skipLogs) _logger.Info($"-------------------- REMOTE --------------------");
             TreeDumper dumper = new TreeDumper();
-            _remoteStateTree.Accept(dumper, _remoteCodeDb);
+            _remoteStateTree.Accept(dumper, _remoteCodeDb, _remoteStateTree.RootHash);
             string local = dumper.ToString();
             if (!skipLogs) _logger.Info(local);
             if (!skipLogs) _logger.Info($"-------------------- LOCAL --------------------");
             dumper.Reset();
-            _localStateTree.Accept(dumper, _localCodeDb);
+            _localStateTree.Accept(dumper, _localCodeDb, _localStateTree.RootHash);
             string remote = dumper.ToString();
             if (!skipLogs) _logger.Info(remote);
 
@@ -929,7 +930,7 @@ namespace Nethermind.Blockchain.Test.Synchronization.FastSync
             {
                 Assert.AreEqual(remote, local);
                 TrieStatsCollector collector = new TrieStatsCollector(_logManager);
-                _localStateTree.Accept(collector, _localCodeDb);
+                _localStateTree.Accept(collector, _localCodeDb, _localStateTree.RootHash);
                 Assert.AreEqual(0, collector.Stats.MissingCode);
             }
 

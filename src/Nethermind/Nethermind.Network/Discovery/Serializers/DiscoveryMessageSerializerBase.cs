@@ -23,7 +23,6 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
 using Nethermind.Network.Discovery.Messages;
-using NLog;
 
 namespace Nethermind.Network.Discovery.Serializers
 {
@@ -42,7 +41,7 @@ namespace Nethermind.Network.Discovery.Serializers
             INodeIdResolver nodeIdResolver)
         {
             _ecdsa = ecdsa ?? throw new ArgumentNullException(nameof(ecdsa));
-            _privateKey = privateKeyGenerator.Generate() ?? throw new ArgumentNullException(nameof(_privateKey));
+            _privateKey = privateKeyGenerator.Generate();
             _messageFactory = messageFactory ?? throw new ArgumentNullException(nameof(messageFactory));
             _nodeIdResolver = nodeIdResolver ?? throw new ArgumentNullException(nameof(nodeIdResolver));
         }

@@ -55,7 +55,7 @@ namespace Nethermind.JsonRpc.Test
         private JsonRpcResponse TestRequest<T>(T module, string method, params string[] parameters) where T : IModule
         {
             RpcModuleProvider moduleProvider = new RpcModuleProvider(_configurationProvider.GetConfig<IJsonRpcConfig>(), LimboLogs.Instance);
-            moduleProvider.Register(new SingletonModulePool<T>(new SingletonFactory<T>(module)));
+            moduleProvider.Register(new SingletonModulePool<T>(new SingletonFactory<T>(module), true));
             _jsonRpcService = new JsonRpcService(moduleProvider, _logManager);
             JsonRpcRequest request = RpcTest.GetJsonRequest(method, parameters);
             JsonRpcResponse response = _jsonRpcService.SendRequestAsync(request).Result;
@@ -87,9 +87,9 @@ namespace Nethermind.JsonRpc.Test
             EthereumJsonSerializer serializer = new EthereumJsonSerializer();
             string serialized = serializer.Serialize(new TransactionForRpc());
             IEthModule ethModule = Substitute.For<IEthModule>();
-            ethModule.eth_call(Arg.Any<TransactionForRpc>()).ReturnsForAnyArgs(x => ResultWrapper<byte[]>.Success(new byte[] {1}));
+            ethModule.eth_call(Arg.Any<TransactionForRpc>()).ReturnsForAnyArgs(x => ResultWrapper<string>.Success("0x1"));
             JsonRpcResponse response = TestRequest<IEthModule>(ethModule, "eth_call", serialized);
-            Assert.AreEqual(1, (response.Result as byte[]).Length);
+            Assert.AreEqual("0x1", response.Result);
         }
         
         [Test]

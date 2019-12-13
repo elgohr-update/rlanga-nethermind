@@ -17,11 +17,13 @@
  */
 
 using System;
+using System.Buffers;
 using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel.Design;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
@@ -37,6 +39,7 @@ namespace Nethermind.Evm
 {
     public class VirtualMachine : IVirtualMachine
     {
+        private const EvmExceptionType StaticCallViolationErrorText = EvmExceptionType.StaticCallViolation;
         private const EvmExceptionType BadInstructionErrorText = EvmExceptionType.BadInstruction;
         private const EvmExceptionType OutOfGasErrorText = EvmExceptionType.OutOfGas;
         
@@ -404,7 +407,6 @@ namespace Nethermind.Evm
         {
             if (gasAvailable < gasCost)
             {
-                Metrics.EvmExceptions++;
                 return false;
             }
 
@@ -461,11 +463,13 @@ namespace Nethermind.Evm
             //if(!UpdateGas(dataGasCost, ref gasAvailable)) return CallResult.Exception;
             if (!UpdateGas(baseGasCost, ref gasAvailable))
             {
+                Metrics.EvmExceptions++;
                 throw new OutOfGasException();
             }
 
             if (!UpdateGas(dataGasCost, ref gasAvailable))
             {
+                Metrics.EvmExceptions++;
                 throw new OutOfGasException();
             }
 
@@ -745,10 +749,8 @@ namespace Nethermind.Evm
                     throw new EvmStackOverflowException();
                 }
             }
-
-            byte[] wordBufferArray = new byte[32];
-            Span<byte> wordBuffer = wordBufferArray.AsSpan();
-
+            
+            Span<byte> wordBuffer = stackalloc byte[32];
             void Swap(int depth, Span<byte> stack, Span<byte> buffer)
             {
                 if (stackHead < depth)
@@ -773,6 +775,7 @@ namespace Nethermind.Evm
                 }
             }
 
+            // ReSharper disable once ImplicitlyCapturedClosure
             Span<byte> PopBytes(Span<byte> stack)
             {
                 if (stackHead == 0)
@@ -1282,17 +1285,21 @@ namespace Nethermind.Evm
                             Vector<byte> aVec = new Vector<byte>(a);
                             Vector<byte> bVec = new Vector<byte>(b);
 
-                            Vector.BitwiseAnd(aVec, bVec).CopyTo(wordBufferArray);
+                            Vector.BitwiseAnd(aVec, bVec).CopyTo(wordBuffer);
                         }
                         else
                         {
-                            for (int i = 0; i < 32; i++)
-                            {
-                                wordBuffer[i] = (byte)(a[i] & b[i]);
-                            }
+                            ref var refA = ref MemoryMarshal.AsRef<ulong>(a);
+                            ref var refB = ref MemoryMarshal.AsRef<ulong>(b);
+                            ref var refBuffer = ref MemoryMarshal.AsRef<ulong>(wordBuffer);
+
+                            refBuffer = refA & refB;
+                            Unsafe.Add(ref refBuffer, 1) = Unsafe.Add(ref refA, 1) & Unsafe.Add(ref refB, 1);
+                            Unsafe.Add(ref refBuffer, 2) = Unsafe.Add(ref refA, 2) & Unsafe.Add(ref refB, 2);
+                            Unsafe.Add(ref refBuffer, 3) = Unsafe.Add(ref refA, 3) & Unsafe.Add(ref refB, 3);
                         }
 
-                        PushBytes(wordBufferArray, bytesOnStack);
+                        PushBytes(wordBuffer, bytesOnStack);
                         break;
                     }
                     case Instruction.OR:
@@ -1311,17 +1318,21 @@ namespace Nethermind.Evm
                             Vector<byte> aVec = new Vector<byte>(a);
                             Vector<byte> bVec = new Vector<byte>(b);
 
-                            Vector.BitwiseOr(aVec, bVec).CopyTo(wordBufferArray);
+                            Vector.BitwiseOr(aVec, bVec).CopyTo(wordBuffer);
                         }
                         else
                         {
-                            for (int i = 0; i < 32; i++)
-                            {
-                                wordBuffer[i] = (byte)(a[i] | b[i]);
-                            }
+                            ref var refA = ref MemoryMarshal.AsRef<ulong>(a);
+                            ref var refB = ref MemoryMarshal.AsRef<ulong>(b);
+                            ref var refBuffer = ref MemoryMarshal.AsRef<ulong>(wordBuffer);
+
+                            refBuffer = refA | refB;
+                            Unsafe.Add(ref refBuffer, 1) = Unsafe.Add(ref refA, 1) | Unsafe.Add(ref refB, 1);
+                            Unsafe.Add(ref refBuffer, 2) = Unsafe.Add(ref refA, 2) | Unsafe.Add(ref refB, 2);
+                            Unsafe.Add(ref refBuffer, 3) = Unsafe.Add(ref refA, 3) | Unsafe.Add(ref refB, 3);
                         }
 
-                        PushBytes(wordBufferArray, bytesOnStack);
+                        PushBytes(wordBuffer, bytesOnStack);
                         break;
                     }
                     case Instruction.XOR:
@@ -1340,17 +1351,21 @@ namespace Nethermind.Evm
                             Vector<byte> aVec = new Vector<byte>(a);
                             Vector<byte> bVec = new Vector<byte>(b);
 
-                            Vector.Xor(aVec, bVec).CopyTo(wordBufferArray);
+                            Vector.Xor(aVec, bVec).CopyTo(wordBuffer);
                         }
                         else
                         {
-                            for (int i = 0; i < 32; i++)
-                            {
-                                wordBuffer[i] = (byte)(a[i] ^ b[i]);
-                            }
+                            ref var refA = ref MemoryMarshal.AsRef<ulong>(a);
+                            ref var refB = ref MemoryMarshal.AsRef<ulong>(b);
+                            ref var refBuffer = ref MemoryMarshal.AsRef<ulong>(wordBuffer);
+
+                            refBuffer = refA ^ refB;
+                            Unsafe.Add(ref refBuffer, 1) = Unsafe.Add(ref refA, 1) ^ Unsafe.Add(ref refB, 1);
+                            Unsafe.Add(ref refBuffer, 2) = Unsafe.Add(ref refA, 2) ^ Unsafe.Add(ref refB, 2);
+                            Unsafe.Add(ref refBuffer, 3) = Unsafe.Add(ref refA, 3) ^ Unsafe.Add(ref refB, 3);
                         }
 
-                        PushBytes(wordBufferArray, bytesOnStack);
+                        PushBytes(wordBuffer, bytesOnStack);
                         break;
                     }
                     case Instruction.NOT:
@@ -1368,17 +1383,20 @@ namespace Nethermind.Evm
                             Vector<byte> aVec = new Vector<byte>(a);
                             Vector<byte> negVec = Vector.Xor(aVec, new Vector<byte>(BytesMax32));
 
-                            negVec.CopyTo(wordBufferArray);
+                            negVec.CopyTo(wordBuffer);
                         }
                         else
                         {
-                            for (int i = 0; i < 32; ++i)
-                            {
-                                wordBufferArray[i] = (byte)~a[i];
-                            }
+                            ref var refA = ref MemoryMarshal.AsRef<ulong>(a);
+                            ref var refBuffer = ref MemoryMarshal.AsRef<ulong>(wordBuffer);
+
+                            refBuffer = ~refA;
+                            Unsafe.Add(ref refBuffer, 1) = ~Unsafe.Add(ref refA, 1);
+                            Unsafe.Add(ref refBuffer, 2) = ~Unsafe.Add(ref refA, 2);
+                            Unsafe.Add(ref refBuffer, 3) = ~Unsafe.Add(ref refA, 3) ;
                         }
 
-                        PushBytes(wordBufferArray, bytesOnStack);
+                        PushBytes(wordBuffer, bytesOnStack);
                         break;
                     }
                     case Instruction.BYTE:
@@ -1499,7 +1517,7 @@ namespace Nethermind.Evm
                             return CallResult.OutOfGasException;
                         }
 
-                        PopUInt(out BigInteger src, bytesOnStack);
+                        PopUInt256(out UInt256 src, bytesOnStack);
                         PushBytes(env.InputData.SliceWithZeroPadding(src, 32), bytesOnStack);
                         break;
                     }
@@ -1613,7 +1631,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip211Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -1632,7 +1649,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip211Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -1650,7 +1666,6 @@ namespace Nethermind.Evm
 
                         if (UInt256.AddWouldOverflow(ref length, ref src) || length + src > _returnDataBuffer.Length)
                         {
-                            Metrics.EvmExceptions++;
                             return CallResult.AccessViolationException;
                         }
 
@@ -1738,7 +1753,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip1344Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -1756,7 +1770,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip1884Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -1856,7 +1869,7 @@ namespace Nethermind.Evm
                         
                         if (evmState.IsStatic)
                         {
-                            Metrics.EvmExceptions++;
+                            EndInstructionTraceError(StaticCallViolationErrorText);
                             return CallResult.StaticCallViolationException;
                         }
 
@@ -1868,9 +1881,8 @@ namespace Nethermind.Evm
                             return CallResult.OutOfGasException;
                         }
                         
-                        if (spec.IsEip2200Enabled && gasAvailable < GasCostOf.CallStipend)
+                        if (spec.IsEip2200Enabled && gasAvailable <= GasCostOf.CallStipend)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(OutOfGasErrorText);
                             return CallResult.OutOfGasException;
                         }
@@ -1999,7 +2011,7 @@ namespace Nethermind.Evm
                         if (_txTracer.IsTracingInstructions)
                         {
                             byte[] valueToStore = newIsZero ? BytesZero : newValue;
-                            Span<byte> span = stackalloc byte[32];
+                            Span<byte> span = new byte[32]; // do not stackalloc here
                             storageAddress.Index.ToBigEndian(span);
                             _txTracer.ReportStorageChange(span, valueToStore);
                         }
@@ -2251,7 +2263,7 @@ namespace Nethermind.Evm
                     {
                         if (evmState.IsStatic)
                         {
-                            Metrics.EvmExceptions++;
+                            EndInstructionTraceError(StaticCallViolationErrorText);
                             return CallResult.StaticCallViolationException;
                         }
 
@@ -2292,7 +2304,7 @@ namespace Nethermind.Evm
                         
                         if (evmState.IsStatic)
                         {
-                            Metrics.EvmExceptions++;
+                            EndInstructionTraceError(StaticCallViolationErrorText);
                             return CallResult.StaticCallViolationException;
                         }
 
@@ -2421,7 +2433,6 @@ namespace Nethermind.Evm
                         if (instruction == Instruction.DELEGATECALL && !spec.IsEip7Enabled ||
                             instruction == Instruction.STATICCALL && !spec.IsEip214Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -2450,7 +2461,7 @@ namespace Nethermind.Evm
 
                         if (evmState.IsStatic && !transferValue.IsZero && instruction != Instruction.CALLCODE)
                         {
-                            Metrics.EvmExceptions++;
+                            EndInstructionTraceError(StaticCallViolationErrorText);
                             return CallResult.StaticCallViolationException;
                         }
 
@@ -2606,7 +2617,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip140Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -2628,8 +2638,7 @@ namespace Nethermind.Evm
                             EndInstructionTraceError(OutOfGasErrorText);
                             return CallResult.OutOfGasException;
                         }
-
-                        Metrics.EvmExceptions++;
+                        
                         EndInstructionTraceError(BadInstructionErrorText);
                         return CallResult.InvalidInstructionException;
                     }
@@ -2637,7 +2646,7 @@ namespace Nethermind.Evm
                     {
                         if (evmState.IsStatic)
                         {
-                            Metrics.EvmExceptions++;
+                            EndInstructionTraceError(StaticCallViolationErrorText);
                             return CallResult.StaticCallViolationException;
                         }
 
@@ -2693,7 +2702,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip145Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -2723,7 +2731,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip145Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -2753,7 +2760,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip145Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -2795,7 +2801,6 @@ namespace Nethermind.Evm
                     {
                         if (!spec.IsEip1052Enabled)
                         {
-                            Metrics.EvmExceptions++;
                             EndInstructionTraceError(BadInstructionErrorText);
                             return CallResult.InvalidInstructionException;
                         }
@@ -2821,7 +2826,6 @@ namespace Nethermind.Evm
                     }
                     default:
                     {
-                        Metrics.EvmExceptions++;
                         EndInstructionTraceError(BadInstructionErrorText);
                         return CallResult.InvalidInstructionException;
                     }

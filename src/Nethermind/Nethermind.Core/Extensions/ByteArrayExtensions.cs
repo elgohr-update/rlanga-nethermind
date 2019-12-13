@@ -20,11 +20,13 @@ using System;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading;
 using Extensions.Data;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
+using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Core.Extensions
 {
@@ -149,7 +151,7 @@ namespace Nethermind.Core.Extensions
         {
             if (bytes.Length != otherBytes.Length)
             {
-                throw new InvalidOperationException($"Trying to xor arrays of different lengths: {bytes?.Length} and {otherBytes?.Length}");
+                throw new InvalidOperationException($"Trying to xor arrays of different lengths: {bytes.Length} and {otherBytes.Length}");
             }
             
             byte[] result = new byte[bytes.Length];
@@ -159,6 +161,35 @@ namespace Nethermind.Core.Extensions
             }
 
             return result;
+        }
+        
+        public static byte[] Xor(this Span<byte> bytes, Span<byte> otherBytes)
+        {
+            if (bytes.Length != otherBytes.Length)
+            {
+                throw new InvalidOperationException($"Trying to xor arrays of different lengths: {bytes.Length} and {otherBytes.Length}");
+            }
+            
+            byte[] result = new byte[bytes.Length];
+            for (int i = 0; i < result.Length; i++)
+            {
+                result[i] = (byte)(bytes[i] ^ otherBytes[i]);
+            }
+
+            return result;
+        }
+        
+        public static void XorInPlace(this byte[] bytes, byte[] otherBytes)
+        {
+            if (bytes.Length != otherBytes.Length)
+            {
+                throw new InvalidOperationException($"Trying to xor arrays of different lengths: {bytes?.Length} and {otherBytes?.Length}");
+            }
+            
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = (byte)(bytes[i] ^ otherBytes[i]);
+            }
         }
 
         public static RlpStream AsRlpStream(this byte[] bytes)
@@ -189,10 +220,9 @@ namespace Nethermind.Core.Extensions
             Buffer.BlockCopy(bytes, startIndex, slice, 0, length);
             return slice;
         }
-        
-        public static byte[] SliceWithZeroPadding(this byte[] bytes, BigInteger startIndex, int length)
+
+        public static byte[] SliceWithZeroPadding(this Span<byte> bytes, int startIndex, int length)
         {
-            // TODO: use span here
             if (startIndex >= bytes.Length)
             {
                 return new byte[length];
@@ -200,42 +230,36 @@ namespace Nethermind.Core.Extensions
 
             if (length == 1)
             {
-                return bytes.Length == 0 ? new byte[0] : new[] {bytes[(int)startIndex]};
+                return bytes.Length == 0 ? new byte[0] : new[] {bytes[startIndex]};
             }
 
-            byte[] slice = new byte[length];
-            if (startIndex > bytes.Length - 1)
-            {
-                return slice;
-            }
-
-            Buffer.BlockCopy(bytes, (int)startIndex, slice, 0, Math.Min(bytes.Length - (int)startIndex, length));
-            return slice;
+            byte[] result = new byte[length];
+            int copiedLength = Math.Min(bytes.Length - startIndex, length);
+            bytes.Slice(startIndex, copiedLength).CopyTo(result.AsSpan().Slice(0, copiedLength));
+//            Buffer.BlockCopy(bytes.ToArray(), startIndex, result, 0, Math.Min(bytes.Length - startIndex, length));
+            return result;
         }
 
-        public static Span<byte> SliceWithZeroPadding(this Span<byte> bytes, BigInteger startIndex, int length)
+        public static byte[] SliceWithZeroPadding(this Span<byte> bytes, UInt256 startIndex, int length)
         {
-            if (startIndex >= bytes.Length)
+            if (startIndex >= bytes.Length || startIndex > int.MaxValue)
             {
-                return new byte[length].AsSpan();
+                return new byte[length];
             }
 
-            if (length == 1)
-            {
-                return bytes.Length == 0 ? Span<byte>.Empty : new[] {bytes[(int)startIndex]};
-            }
-
-            byte[] slice = new byte[length];
-            if (startIndex > bytes.Length - 1)
-            {
-                return slice;
-            }
-
-            int finalLength = Math.Min(bytes.Length - (int)startIndex, length);
-            bytes.Slice((int)startIndex, finalLength).CopyTo(slice);
-            return slice;
+            return SliceWithZeroPadding(bytes, (int) startIndex, length);
         }
         
+        public static byte[] SliceWithZeroPadding(this byte[] bytes, UInt256 startIndex, int length)
+        {
+            return bytes.AsSpan().SliceWithZeroPadding(startIndex, length);
+        }
+        
+        public static byte[] SliceWithZeroPadding(this byte[] bytes, int startIndex, int length)
+        {
+            return bytes.AsSpan().SliceWithZeroPadding(startIndex, length);
+        }
+
         public static byte[] SliceWithZeroPaddingEmptyOnError(this byte[] bytes, BigInteger startIndex, int length)
         {
             if (startIndex >= bytes.Length || length == 0)
@@ -261,8 +285,7 @@ namespace Nethermind.Core.Extensions
         public static int GetXxHashCode(this byte[] bytes)
         {
             LazyInitializer.EnsureInitialized(ref _xxHash, XXHash32.Create);
-            byte[] hash = _xxHash.ComputeHash(bytes);
-            return (hash[0] >> 24) | (hash[1] >> 16) | (hash[2] >> 8) | hash[3];
+            return MemoryMarshal.Read<int>(_xxHash.ComputeHash(bytes));
         }
         
         [SuppressMessage("ReSharper", "NonReadonlyMemberInGetHashCode")]
@@ -275,7 +298,7 @@ namespace Nethermind.Core.Extensions
                 return 0;
             }
 
-            return (fnvPrime * (((fnvPrime * (bytes[0] + 7)) ^ (bytes[bytes.Length - 1] + 23)) + 11)) ^ (bytes[(bytes.Length - 1) / 2] + 53);
+            return (fnvPrime * (((fnvPrime * (bytes[0] + 7)) ^ (bytes[^1] + 23)) + 11)) ^ (bytes[(bytes.Length - 1) / 2] + 53);
         }
     }
 }

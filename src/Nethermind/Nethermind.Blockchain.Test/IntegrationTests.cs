@@ -74,7 +74,7 @@ namespace Nethermind.Blockchain.Test
             MemDb receiptsDb = new MemDb();
             MemDb traceDb = new MemDb();
             TxPool txPool = new TxPool(NullTxStorage.Instance, Timestamper.Default, ecdsa, specProvider, new TxPoolConfig(), stateProvider, logManager);
-            IReceiptStorage receiptStorage = new PersistentReceiptStorage(receiptsDb, NullDb.Instance, specProvider, logManager);
+            IReceiptStorage receiptStorage = new PersistentReceiptStorage(receiptsDb, specProvider, logManager);
             var blockInfoDb = new MemDb();
             BlockTree blockTree = new BlockTree(new MemDb(), new MemDb(), blockInfoDb, new ChainLevelInfoRepository(blockInfoDb), specProvider, txPool, logManager);
             Timestamper timestamper = new Timestamper();
@@ -100,7 +100,7 @@ namespace Nethermind.Blockchain.Test
             ChainSpecLoader loader = new ChainSpecLoader(new EthereumJsonSerializer());
             string path = "chainspec.json";
             logManager.GetClassLogger().Info($"Loading ChainSpec from {path}");
-            ChainSpec chainSpec = loader.Load(File.ReadAllBytes(path));
+            ChainSpec chainSpec = loader.Load(File.ReadAllText(path));
             foreach (var allocation in chainSpec.Allocations)
             {
                 stateProvider.CreateAccount(allocation.Key, allocation.Value.Balance);

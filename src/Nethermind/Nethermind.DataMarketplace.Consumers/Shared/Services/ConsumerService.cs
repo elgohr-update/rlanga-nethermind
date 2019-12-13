@@ -35,6 +35,8 @@ using Nethermind.DataMarketplace.Consumers.Refunds;
 using Nethermind.DataMarketplace.Consumers.Sessions;
 using Nethermind.DataMarketplace.Consumers.Sessions.Domain;
 using Nethermind.DataMarketplace.Core.Domain;
+using Nethermind.DataMarketplace.Core.Services;
+using Nethermind.DataMarketplace.Core.Services.Models;
 using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.DataMarketplace.Consumers.Shared.Services
@@ -53,12 +55,14 @@ namespace Nethermind.DataMarketplace.Consumers.Shared.Services
         private readonly IReceiptService _receiptService;
         private readonly IRefundService _refundService;
         private readonly ISessionService _sessionService;
+        private readonly IProxyService _proxyService;
 
         public ConsumerService(IAccountService accountService, IDataAssetService dataAssetService,
             IDataRequestService dataRequestService, IDataConsumerService dataConsumerService,
             IDataStreamService dataStreamService, IDepositManager depositManager,
             IDepositApprovalService depositApprovalService, IProviderService providerService,
-            IReceiptService receiptService, IRefundService refundService, ISessionService sessionService)
+            IReceiptService receiptService, IRefundService refundService, ISessionService sessionService,
+            IProxyService proxyService)
         {
             _accountService = accountService;
             _dataAssetService = dataAssetService;
@@ -71,6 +75,7 @@ namespace Nethermind.DataMarketplace.Consumers.Shared.Services
             _receiptService = receiptService;
             _refundService = refundService;
             _sessionService = sessionService;
+            _proxyService = proxyService;
         }
 
         #region Accounts
@@ -151,8 +156,8 @@ namespace Nethermind.DataMarketplace.Consumers.Shared.Services
         public Task<PagedResult<DepositDetails>> GetDepositsAsync(GetDeposits query)
             => _depositManager.BrowseAsync(query);
 
-        public Task<Keccak> MakeDepositAsync(Keccak assetId, uint units, UInt256 value)
-            => _depositManager.MakeAsync(assetId, units, value, _accountService.GetAddress());
+        public Task<Keccak> MakeDepositAsync(Keccak assetId, uint units, UInt256 value, UInt256? gasPrice = null)
+            => _depositManager.MakeAsync(assetId, units, value, _accountService.GetAddress(), gasPrice);
 
         public Task<PagedResult<DepositApproval>> GetDepositApprovalsAsync(GetConsumerDepositApprovals query)
             => _depositApprovalService.BrowseAsync(query);
@@ -214,10 +219,20 @@ namespace Nethermind.DataMarketplace.Consumers.Shared.Services
 
         public Task FinishSessionsAsync(INdmPeer provider, bool removePeer = true)
             => _sessionService.FinishSessionsAsync(provider, removePeer);
-
+        
         public Task<Keccak> SendFinishSessionAsync(Keccak depositId)
             => _sessionService.SendFinishSessionAsync(depositId);
         
+        #endregion
+        
+        #region Proxy
+
+        public Task<NdmProxy> GetProxyAsync()
+            => _proxyService.GetAsync();
+
+        public Task SetProxyAsync(IEnumerable<string> urls)
+            => _proxyService.SetAsync(urls);
+
         #endregion
     }
 }

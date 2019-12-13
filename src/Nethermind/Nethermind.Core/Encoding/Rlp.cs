@@ -17,6 +17,7 @@
  */
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
@@ -156,7 +157,7 @@ namespace Nethermind.Core.Encoding
             {
                 return Encode(new[] {rlp});
             }
-
+            
             if (Decoders.ContainsKey(typeof(T)))
             {
                 return ((IRlpDecoder<T>) Decoders[typeof(T)]).Encode(item, behaviors);
@@ -420,7 +421,9 @@ namespace Nethermind.Core.Encoding
         /// <returns></returns>
         public static Rlp Encode(ulong value)
         {
-            return Encode(value.ToBigEndianByteArray());
+            Span<byte> bytes = stackalloc byte[8];
+            BinaryPrimitives.WriteUInt64BigEndian(bytes, value);
+            return Encode(bytes);
         }
 
         public static Rlp Encode(long value)
@@ -830,10 +833,10 @@ namespace Nethermind.Core.Encoding
             return new Rlp(result);
         }
 
-        public static Rlp Encode(Keccak[] sequence)
+        public static Rlp Encode(IList<Keccak> sequence)
         {
-            Rlp[] rlpSequence = new Rlp[sequence.Length];
-            for (int i = 0; i < sequence.Length; i++)
+            Rlp[] rlpSequence = new Rlp[sequence.Count];
+            for (int i = 0; i < sequence.Count; i++)
             {
                 rlpSequence[i] = Encode(sequence[i]);
             }
@@ -1340,52 +1343,6 @@ namespace Nethermind.Core.Encoding
                 return result;
             }
 
-            public uint DecodeUInt()
-            {
-                byte[] bytes = DecodeByteArray();
-                return bytes.Length == 0 ? 0 : bytes.ToUInt32();
-            }
-
-            public long DecodeLong()
-            {
-                int prefix = ReadByte();
-                if (prefix < 128)
-                {
-                    return prefix;
-                }
-
-                if (prefix == 128)
-                {
-                    return 0;
-                }
-
-                int length = prefix - 128;
-                if (length > 8)
-                {
-                    throw new RlpException($"Unexpected length of long value: {length}");
-                }
-
-                long result = 0;
-                for (int i = 8; i > 0; i--)
-                {
-                    result = result << 8;
-                    if (i <= length)
-                    {
-                        result = result | Data[Position + length - i];
-                    }
-                }
-
-                Position += length;
-
-                return result;
-            }
-
-            public ulong DecodeUlong()
-            {
-                byte[] bytes = DecodeByteArray();
-                return bytes.Length == 0 ? 0L : bytes.ToUInt64();
-            }
-            
             public byte[] DecodeByteArray()
             {
                 return DecodeByteArraySpan().ToArray();

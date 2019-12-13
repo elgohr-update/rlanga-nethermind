@@ -23,8 +23,6 @@ using Nethermind.DataMarketplace.Channels;
 using Nethermind.DataMarketplace.Core;
 using Nethermind.DataMarketplace.Core.Domain;
 using Nethermind.DataMarketplace.Core.Services;
-using Nethermind.Facade;
-using Nethermind.Facade.Proxy;
 
 namespace Nethermind.DataMarketplace.Infrastructure
 {
@@ -34,27 +32,29 @@ namespace Nethermind.DataMarketplace.Infrastructure
         public IAbiEncoder AbiEncoder { get; }
         public IRlpDecoder<DataAsset> DataAssetRlpDecoder { get; }
         public IDepositService DepositService { get; }
+        public GasPriceService GasPriceService { get; }
+        public TransactionService TransactionService { get; }
         public INdmDataPublisher NdmDataPublisher { get; }
         public IJsonRpcNdmConsumerChannel JsonRpcNdmConsumerChannel { get; }
         public INdmConsumerChannelManager NdmConsumerChannelManager { get; }
         public INdmBlockchainBridge BlockchainBridge { get; }
-        public IEthJsonRpcClientProxy EthJsonRpcClientProxy { get; }
 
         public NdmCreatedServices(Address consumerAddress,
             IAbiEncoder abiEncoder, IRlpDecoder<DataAsset> dataAssetRlpDecoder, IDepositService depositService,
+            GasPriceService gasPriceService, TransactionService transactionService,
             INdmDataPublisher ndmDataPublisher, IJsonRpcNdmConsumerChannel jsonRpcNdmConsumerChannel,
-            INdmConsumerChannelManager ndmConsumerChannelManager, INdmBlockchainBridge blockchainBridge,
-            IEthJsonRpcClientProxy ethJsonRpcClientProxy)
+            INdmConsumerChannelManager ndmConsumerChannelManager, INdmBlockchainBridge blockchainBridge)
         {
             ConsumerAddress = consumerAddress;
             AbiEncoder = abiEncoder;
             DataAssetRlpDecoder = dataAssetRlpDecoder;
             DepositService = depositService;
+            GasPriceService = gasPriceService;
+            TransactionService = transactionService;
             NdmDataPublisher = ndmDataPublisher;
             JsonRpcNdmConsumerChannel = jsonRpcNdmConsumerChannel;
             NdmConsumerChannelManager = ndmConsumerChannelManager;
             BlockchainBridge = blockchainBridge;
-            EthJsonRpcClientProxy = ethJsonRpcClientProxy;
         }
     }
 }

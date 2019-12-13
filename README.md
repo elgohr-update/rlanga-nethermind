@@ -5,7 +5,6 @@
 | :-------- | :------ | :------------ |
 | Documentation | [![ReadtheDocs](https://readthedocs.org/projects/nethermind/badge/?version=latest)](https://nethermind.readthedocs.io) | https://nethermind.readthedocs.io |
 | Gitter | [![Gitter](https://img.shields.io/gitter/room/nethermindeth/nethermind.svg)](https://gitter.im/nethermindeth/nethermind) | https://gitter.im/nethermindeth/nethermind |
-| Discord | | https://discordapp.com/channels/629004402170134531 |
 | Twitter | | https://twitter.com/nethermindeth |
 | Releases | [![GitHub release](https://img.shields.io/github/release/NethermindEth/nethermind.svg)](https://github.com/NethermindEth/nethermind/releases) | https://github.com/NethermindEth/nethermind/releases |
 | Travis CI | [![Build Status](https://travis-ci.org/NethermindEth/nethermind.svg?branch=master)](https://travis-ci.org/NethermindEth/nethermind) | https://travis-ci.org/NethermindEth/nethermind |
@@ -38,6 +37,14 @@ it syncs fully on Mainnet, Ropsten, Rinkeby, Goerli
 *	Linux https://www.microsoft.com/net/download?initial-os=linux (make sure to select the right distribution)
 * `sudo apt-get update && sudo apt-get install libsnappy-dev libc6-dev libc6`
 
+Additionally for Ubuntu 16.04
+
+```
+sudo add-apt-repository ppa:ubuntu-toolchain-r/test && \
+sudo apt-get update && \
+sudo apt-get install gcc-6 g++-6 && \
+sudo apt install libzstd1
+```
 #### Mac
 
 *	Mac https://www.microsoft.com/net/download?initial-os=macos

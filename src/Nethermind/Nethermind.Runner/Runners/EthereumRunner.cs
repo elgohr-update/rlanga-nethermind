@@ -21,11 +21,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Abi;
 using Nethermind.AuRa;
+using Nethermind.AuRa.Config;
 using Nethermind.AuRa.Rewards;
 using Nethermind.AuRa.Validators;
 using Nethermind.Blockchain;
@@ -81,6 +83,7 @@ using Nethermind.KeyStore.Config;
 using Nethermind.Logging;
 using Nethermind.Mining;
 using Nethermind.Mining.Difficulty;
+using Nethermind.Monitoring;
 using Nethermind.Network;
 using Nethermind.Network.Config;
 using Nethermind.Network.Crypto;
@@ -134,6 +137,7 @@ namespace Nethermind.Runner.Runners
         private ICryptoRandom _cryptoRandom = new CryptoRandom();
         private IJsonSerializer _jsonSerializer = new UnforgivingJsonSerializer();
         private IJsonSerializer _ethereumJsonSerializer;
+        private readonly IMonitoringService _monitoringService;
         private CancellationTokenSource _runnerCancellation;
         private IBlockchainProcessor _blockchainProcessor;
         private IDiscoveryApp _discoveryApp;
@@ -175,16 +179,19 @@ namespace Nethermind.Runner.Runners
         private ITransactionProcessor _transactionProcessor;
         private ITxPoolInfoProvider _txPoolInfoProvider;
         private INetworkConfig _networkConfig;
-        private ChainLevelInfoRepository _chainLevelInfoRepository;
+        private IChainLevelInfoRepository _chainLevelInfoRepository;
         private IBlockFinalizationManager _finalizationManager;
+        private IJsonRpcClientProxy _jsonRpcClientProxy;
+        private IEthJsonRpcClientProxy _ethJsonRpcClientProxy;
+        private IHttpClient _httpClient;
         public const string DiscoveryNodesDbPath = "discoveryNodes";
         public const string PeersDbPath = "peers";
 
         public EthereumRunner(IRpcModuleProvider rpcModuleProvider, IConfigProvider configurationProvider,
-            ILogManager logManager, IGrpcServer grpcServer, 
+            ILogManager logManager, IGrpcServer grpcServer,
             INdmConsumerChannelManager ndmConsumerChannelManager, INdmDataPublisher ndmDataPublisher,
             INdmInitializer ndmInitializer, IWebSocketsManager webSocketsManager,
-            IJsonSerializer ethereumJsonSerializer)
+            IJsonSerializer ethereumJsonSerializer, IMonitoringService monitoringService)
         {
             _logManager = logManager ?? throw new ArgumentNullException(nameof(logManager));
             _grpcServer = grpcServer;
@@ -193,6 +200,7 @@ namespace Nethermind.Runner.Runners
             _ndmInitializer = ndmInitializer;
             _webSocketsManager = webSocketsManager;
             _ethereumJsonSerializer = ethereumJsonSerializer;
+            _monitoringService = monitoringService;
             _logger = _logManager.GetClassLogger();
 
             _configProvider = configurationProvider ?? throw new ArgumentNullException(nameof(configurationProvider));
@@ -260,7 +268,7 @@ namespace Nethermind.Runner.Runners
                     _wallet = new DevKeyStoreWallet(_keyStore, _logManager);
                     break;
                 default:
-                    _wallet = new NullWallet();
+                    _wallet = NullWallet.Instance;
                     break;
             }
 
@@ -283,10 +291,9 @@ namespace Nethermind.Runner.Runners
             var ndmConfig = _configProvider.GetConfig<INdmConfig>();
             if (ndmConfig.Enabled && !(_ndmInitializer is null) && ndmConfig.ProxyEnabled)
             {
+                var proxyFactory = new EthModuleProxyFactory(_ethJsonRpcClientProxy, _wallet);
+                _rpcModuleProvider.Register(new SingletonModulePool<IEthModule>(proxyFactory, true));
                 if (_logger.IsInfo) _logger.Info("Enabled JSON RPC Proxy for NDM.");
-                var proxyFactory = new EthModuleProxyFactory(ndmConfig.JsonRpcUrlProxies, _ethereumJsonSerializer,
-                    _logManager);
-                _rpcModuleProvider.Register(new SingletonModulePool<IEthModule>(proxyFactory));
             }
             else
             {
@@ -304,27 +311,27 @@ namespace Nethermind.Runner.Runners
             if (_sealValidator is CliqueSealValidator)
             {
                 CliqueModule cliqueModule = new CliqueModule(_logManager, new CliqueBridge(_blockProducer as ICliqueBlockProducer, _snapshotManager, _blockTree));
-                _rpcModuleProvider.Register(new SingletonModulePool<ICliqueModule>(cliqueModule));
+                _rpcModuleProvider.Register(new SingletonModulePool<ICliqueModule>(cliqueModule, true));
             }
 
             if (_initConfig.EnableUnsecuredDevWallet)
             {
                 PersonalBridge personalBridge = new PersonalBridge(_ethereumEcdsa, _wallet);
                 PersonalModule personalModule = new PersonalModule(personalBridge, _logManager);
-                _rpcModuleProvider.Register(new SingletonModulePool<IPersonalModule>(personalModule));
+                _rpcModuleProvider.Register(new SingletonModulePool<IPersonalModule>(personalModule, true));
             }
 
             AdminModule adminModule = new AdminModule(_logManager, _peerManager, _staticNodesManager);
-            _rpcModuleProvider.Register(new SingletonModulePool<IAdminModule>(adminModule));
+            _rpcModuleProvider.Register(new SingletonModulePool<IAdminModule>(adminModule, true));
             
             TxPoolModule txPoolModule = new TxPoolModule(_logManager, _txPoolInfoProvider);
-            _rpcModuleProvider.Register(new SingletonModulePool<ITxPoolModule>(txPoolModule));
+            _rpcModuleProvider.Register(new SingletonModulePool<ITxPoolModule>(txPoolModule, true));
 
             NetModule netModule = new NetModule(_logManager, new NetBridge(_enode, _syncServer, _peerManager));
-            _rpcModuleProvider.Register(new SingletonModulePool<INetModule>(netModule));
+            _rpcModuleProvider.Register(new SingletonModulePool<INetModule>(netModule, true));
 
             ParityModule parityModule = new ParityModule(_ethereumEcdsa, _txPool, _blockTree, _receiptStorage, _logManager);
-            _rpcModuleProvider.Register(new SingletonModulePool<IParityModule>(parityModule));
+            _rpcModuleProvider.Register(new SingletonModulePool<IParityModule>(parityModule, true));
         }
 
         private void UpdateDiscoveryConfig()
@@ -421,7 +428,7 @@ namespace Nethermind.Runner.Runners
                 if (_logger.IsDebug) _logger.Debug($"DB {propertyInfo.Name}: {propertyInfo.GetValue(dbConfig)}");
             }
 
-            _dbProvider = HiveEnabled
+            _dbProvider = (HiveEnabled || _initConfig.UseMemDb)
                 ? (IDbProvider) new MemDbProvider()
                 : new RocksDbProvider(_initConfig.BaseDbPath, dbConfig, _logManager, _initConfig.StoreTraces, _initConfig.StoreReceipts || _syncConfig.DownloadReceiptsInFastSync);
             
@@ -443,8 +450,7 @@ namespace Nethermind.Runner.Runners
                 _ethereumEcdsa,
                 _specProvider,
                 _txPoolConfig, _stateProvider, _logManager);
-            var _rc7FixDb = _initConfig.EnableRc7Fix ? _dbProvider.HeadersDb : NullDb.Instance;
-            _receiptStorage = new PersistentReceiptStorage(_dbProvider.ReceiptsDb, _rc7FixDb, _specProvider, _logManager);
+            _receiptStorage = new PersistentReceiptStorage(_dbProvider.ReceiptsDb, _specProvider, _logManager);
 
             _chainLevelInfoRepository = new ChainLevelInfoRepository(_dbProvider.BlockInfosDb);
             
@@ -474,7 +480,7 @@ namespace Nethermind.Runner.Runners
                 _stateProvider,
                 _logManager);
             
-            IList<IAdditionalBlockProcessor> blockPreProcessors = new List<IAdditionalBlockProcessor>();
+            IList<IAdditionalBlockProcessor> additionalBlockProcessors = new List<IAdditionalBlockProcessor>();
             // blockchain processing
             var blockhashProvider = new BlockhashProvider(
                 _blockTree, _logManager);
@@ -493,7 +499,7 @@ namespace Nethermind.Runner.Runners
                 virtualMachine,
                 _logManager);
             
-            InitSealEngine(blockPreProcessors);
+            InitSealEngine(additionalBlockProcessors);
 
             /* validation */
             _headerValidator = new HeaderValidator(
@@ -531,7 +537,7 @@ namespace Nethermind.Runner.Runners
                 _txPool,
                 _receiptStorage,
                 _logManager,
-                blockPreProcessors);
+                additionalBlockProcessors);
 
             _blockchainProcessor = new BlockchainProcessor(
                 _blockTree,
@@ -541,16 +547,17 @@ namespace Nethermind.Runner.Runners
                 _initConfig.StoreReceipts,
                 _initConfig.StoreTraces);
 
-            _finalizationManager = InitFinalizationManager(blockPreProcessors);
+            _finalizationManager = InitFinalizationManager(additionalBlockProcessors);
 
             // create shared objects between discovery and peer manager
             IStatsConfig statsConfig = _configProvider.GetConfig<IStatsConfig>();
             _nodeStatsManager = new NodeStatsManager(statsConfig, _logManager);
 
-            InitBlockProducers();
-
             _blockchainProcessor.Start();
             LoadGenesisBlock(string.IsNullOrWhiteSpace(_initConfig.GenesisHash) ? null : new Keccak(_initConfig.GenesisHash));
+            
+            InitBlockProducers();
+            
             if (_initConfig.ProcessingEnabled)
             {
 #pragma warning disable 4014
@@ -613,17 +620,25 @@ namespace Nethermind.Runner.Runners
 
         private void InitBlockProducers()
         {
-            if (_initConfig.IsMining)
+            ReadOnlyChain GetProducerChain(
+                Func<IDb, IStateProvider, IBlockTree, ITransactionProcessor, ILogManager, IEnumerable<IAdditionalBlockProcessor>> createAdditionalBlockProcessors = null,
+                bool allowStateModification = false)
             {
-                IReadOnlyDbProvider minerDbProvider = new ReadOnlyDbProvider(_dbProvider, false);
+                IReadOnlyDbProvider minerDbProvider = new ReadOnlyDbProvider(_dbProvider, allowStateModification);
                 ReadOnlyBlockTree readOnlyBlockTree = new ReadOnlyBlockTree(_blockTree);
                 ReadOnlyChain producerChain = new ReadOnlyChain(readOnlyBlockTree, _blockValidator, _rewardCalculator,
-                    _specProvider, minerDbProvider, _recoveryStep, _logManager, _txPool, _receiptStorage);
+                    _specProvider, minerDbProvider, _recoveryStep, _logManager, _txPool, _receiptStorage,
+                    createAdditionalBlockProcessors);
+                return producerChain;
+            }
 
+            if (_initConfig.IsMining)
+            {
                 switch (_chainSpec.SealEngineType)
                 {
                     case SealEngineType.Clique:
                     {
+                        var producerChain = GetProducerChain();
                         if (_logger.IsWarn) _logger.Warn("Starting Clique block producer & sealer");
                         CliqueConfig cliqueConfig = new CliqueConfig();
                         cliqueConfig.BlockPeriod = _chainSpec.Clique.Period;
@@ -635,9 +650,19 @@ namespace Nethermind.Runner.Runners
 
                     case SealEngineType.NethDev:
                     {
+                        var producerChain = GetProducerChain();
                         if (_logger.IsWarn) _logger.Warn("Starting Dev block producer & sealer");
-                        _blockProducer = new DevBlockProducer(_txPool, producerChain.Processor, _blockTree,
-                            _timestamper, _logManager);
+                        _blockProducer = new DevBlockProducer(_txPool, producerChain.Processor, _blockTree, _timestamper, _logManager);
+                        break;
+                    }
+                    
+                    case SealEngineType.AuRa:
+                    {
+                        IAuRaValidatorProcessor validator = null;
+                        var producerChain = GetProducerChain((db, s, b, t, l)  => new[] {validator = new AuRaAdditionalBlockProcessorFactory(db, s, new AbiEncoder(), t, b, _receiptStorage, l).CreateValidatorProcessor(_chainSpec.AuRa.Validators)});
+                        if (_logger.IsWarn) _logger.Warn("Starting AuRa block producer & sealer");
+                        _blockProducer = new AuRaBlockProducer(_txPool, producerChain.Processor, _blockTree, _timestamper, new AuRaStepCalculator(_chainSpec.AuRa.StepDuration, _timestamper), _nodeKey.Address, _sealer, producerChain.ReadOnlyStateProvider, _configProvider.GetConfig<IAuraConfig>(), _logManager);
+                        validator.SetFinalizationManager(_finalizationManager, true);
                         break;
                     }
 
@@ -697,12 +722,13 @@ namespace Nethermind.Runner.Runners
                     break;
                 case SealEngineType.AuRa:
                     var abiEncoder = new AbiEncoder();
-                    var validatorProcessor = new AuRaAdditionalBlockProcessorFactory(_dbProvider.StateDb, _stateProvider, abiEncoder, _transactionProcessor, _blockTree, _logManager)
+                    var validatorProcessor = new AuRaAdditionalBlockProcessorFactory(_dbProvider.StateDb, _stateProvider, abiEncoder, _transactionProcessor, _blockTree, _receiptStorage, _logManager)
                         .CreateValidatorProcessor(_chainSpec.AuRa.Validators);
-                        
-                    _sealer = new AuRaSealer();
-                    _sealValidator = new AuRaSealValidator(validatorProcessor, _ethereumEcdsa, _logManager);
+                    
+                    var auRaStepCalculator = new AuRaStepCalculator(_chainSpec.AuRa.StepDuration, _timestamper);    
+                    _sealValidator = new AuRaSealValidator(_chainSpec.AuRa, auRaStepCalculator, validatorProcessor, _ethereumEcdsa, _logManager);
                     _rewardCalculator = new AuRaRewardCalculator(_chainSpec.AuRa, abiEncoder, _transactionProcessor);
+                    _sealer = new AuRaSealer(_blockTree, validatorProcessor, auRaStepCalculator, _nodeKey.Address, new BasicWallet(_nodeKey), _logManager);
                     blockPreProcessors.Add(validatorProcessor);
                     break;
                 default:
@@ -865,7 +891,7 @@ namespace Nethermind.Runner.Runners
 
             _blockTree.NewHeadBlock += GenesisProcessed;
             _blockTree.SuggestBlock(genesis);
-            genesisProcessedEvent.Wait(TimeSpan.FromSeconds(5));
+            genesisProcessedEvent.Wait(TimeSpan.FromSeconds(40));
             if (!genesisLoaded)
             {
                 throw new BlockchainException("Genesis block processing failure");
@@ -950,7 +976,7 @@ namespace Nethermind.Runner.Runners
             _staticNodesManager = new StaticNodesManager(_initConfig.StaticNodesPath, _logManager);
             await _staticNodesManager.InitAsync();
 
-            var peersDb = new SimpleFilePublicKeyDb("PeersDB", Path.Combine(_initConfig.BaseDbPath, PeersDbPath), _logManager);
+            var peersDb = new SimpleFilePublicKeyDb("PeersDB", PeersDbPath.GetApplicationResourcePath(_initConfig.BaseDbPath), _logManager);
             var peerStorage = new NetworkStorage(peersDb, _logManager);
 
             ProtocolValidator protocolValidator = new ProtocolValidator(_nodeStatsManager, _blockTree, _logManager);
@@ -959,6 +985,15 @@ namespace Nethermind.Runner.Runners
             if (!(_ndmInitializer is null))
             {
                 if (_logger.IsInfo) _logger.Info($"Initializing NDM...");
+                _httpClient = new DefaultHttpClient(new HttpClient(), _ethereumJsonSerializer, _logManager);
+                var ndmConfig = _configProvider.GetConfig<INdmConfig>();
+                if (ndmConfig.ProxyEnabled)
+                {
+                    _jsonRpcClientProxy = new JsonRpcClientProxy(_httpClient, ndmConfig.JsonRpcUrlProxies,
+                        _logManager);
+                    _ethJsonRpcClientProxy = new EthJsonRpcClientProxy(_jsonRpcClientProxy);
+                }
+
                 var filterStore = new FilterStore();
                 var filterManager = new FilterManager(filterStore, _blockProcessor, _txPool, _logManager);
                 var capabilityConnector = await _ndmInitializer.InitAsync(_configProvider, _dbProvider,
@@ -966,7 +1001,8 @@ namespace Nethermind.Runner.Runners
                     filterManager, _timestamper, _ethereumEcdsa, _rpcModuleProvider, _keyStore, _ethereumJsonSerializer,
                     _cryptoRandom, _enode, _ndmConsumerChannelManager, _ndmDataPublisher, _grpcServer,
                     _nodeStatsManager, _protocolsManager, protocolValidator, _messageSerializationService,
-                    _initConfig.EnableUnsecuredDevWallet, _webSocketsManager, _logManager, _blockProcessor);
+                    _initConfig.EnableUnsecuredDevWallet, _webSocketsManager, _logManager, _blockProcessor,
+                    _jsonRpcClientProxy, _ethJsonRpcClientProxy, _httpClient, _monitoringService);
                 capabilityConnector.Init();
                 if (_logger.IsInfo) _logger.Info($"NDM initialized.");
             }
@@ -1025,7 +1061,7 @@ namespace Nethermind.Runner.Runners
                 discoveryConfig,
                 _logManager);
 
-            var discoveryDb = new SimpleFilePublicKeyDb("DiscoveryDB", Path.Combine(_initConfig.BaseDbPath, DiscoveryNodesDbPath), _logManager);
+            var discoveryDb = new SimpleFilePublicKeyDb("DiscoveryDB", DiscoveryNodesDbPath.GetApplicationResourcePath(_initConfig.BaseDbPath), _logManager);
             var discoveryStorage = new NetworkStorage(
                 discoveryDb,
                 _logManager);

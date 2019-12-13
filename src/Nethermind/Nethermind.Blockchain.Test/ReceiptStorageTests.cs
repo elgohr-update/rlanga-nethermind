@@ -47,11 +47,11 @@ namespace Nethermind.Blockchain.Test
 
         [Test]
         public void should_add_and_fetch_receipt_from_persistent_storage()
-            => TestAddAndGetReceipt(new PersistentReceiptStorage(new MemDb(), NullDb.Instance, _specProvider, LimboLogs.Instance));
+            => TestAddAndGetReceipt(new PersistentReceiptStorage(new MemDb(), _specProvider, LimboLogs.Instance));
         
         [Test]
         public void should_add_and_fetch_receipt_from_persistent_storage_with_eip_658()
-            => TestAddAndGetReceiptEip658(new PersistentReceiptStorage(new MemDb(), NullDb.Instance, _specProvider, LimboLogs.Instance));
+            => TestAddAndGetReceiptEip658(new PersistentReceiptStorage(new MemDb(), _specProvider, LimboLogs.Instance));
 
         private void TestAddAndGetReceipt(IReceiptStorage storage)
         {
@@ -61,6 +61,7 @@ namespace Nethermind.Blockchain.Test
             var fetchedReceipt = storage.Find(transaction.Hash);
             receipt.StatusCode.Should().Be(fetchedReceipt.StatusCode);
             receipt.PostTransactionState.Should().Be(fetchedReceipt.PostTransactionState);
+            receipt.TxHash.Should().Be(transaction.Hash);
         }
         
         private void TestAddAndGetReceiptEip658(IReceiptStorage storage)
@@ -71,6 +72,7 @@ namespace Nethermind.Blockchain.Test
             var fetchedReceipt = storage.Find(transaction.Hash);
             receipt.StatusCode.Should().Be(fetchedReceipt.StatusCode);
             receipt.PostTransactionState.Should().Be(fetchedReceipt.PostTransactionState);
+            receipt.TxHash.Should().Be(transaction.Hash);
         }
 
         private Transaction GetSignedTransaction(Address to = null)

@@ -39,10 +39,15 @@ namespace Nethermind.Blockchain.Find
         public FilterLog[] FindLogs(LogFilter filter)
         {
             var toBlock = _blockFinder.GetBlock(filter.ToBlock);
+            if (toBlock is null)
+            {
+                return Array.Empty<FilterLog>();
+            }
+            
             var fromBlock = _blockFinder.GetBlock(filter.FromBlock);
             List<FilterLog> results = new List<FilterLog>();
 
-            while (toBlock.Number >= fromBlock.Number)
+            while (toBlock.Number >= (fromBlock?.Number ?? long.MaxValue))
             {
                 if (filter.Matches(toBlock.Bloom))
                 {
@@ -71,11 +76,12 @@ namespace Nethermind.Blockchain.Find
 
                 if (filter.Matches(receipt.Bloom))
                 {
-                    foreach (var log in receipt.Logs)
+                    for (var index = 0; index < receipt.Logs.Length; index++)
                     {
+                        var log = receipt.Logs[index];
                         if (filter.Accepts(log))
                         {
-                            results.Add(new FilterLog(logIndexInBlock, receipt, log));
+                            results.Add(new FilterLog(logIndexInBlock, index, receipt, log));
                         }
 
                         logIndexInBlock++;

@@ -17,6 +17,7 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Nethermind.Core;
@@ -30,6 +31,7 @@ using Nethermind.DataMarketplace.Consumers.Shared;
 using Nethermind.DataMarketplace.Core.Domain;
 using Nethermind.DataMarketplace.Core.Services;
 using Nethermind.DataMarketplace.Infrastructure.Rpc.Models;
+using Nethermind.Dirichlet.Numerics;
 using Nethermind.Facade;
 using Nethermind.JsonRpc;
 using Nethermind.JsonRpc.Modules.Personal;
@@ -38,22 +40,31 @@ namespace Nethermind.DataMarketplace.Consumers.Infrastructure.Rpc
 {
     public class NdmRpcConsumerModule : INdmRpcConsumerModule
     {
-
         private readonly IConsumerService _consumerService;
         private readonly IDepositReportService _depositReportService;
         private readonly IJsonRpcNdmConsumerChannel _jsonRpcNdmConsumerChannel;
         private readonly IEthRequestService _ethRequestService;
+        private readonly IEthPriceService _ethPriceService;
+        private readonly IGasPriceService _gasPriceService;
+        private readonly IConsumerTransactionsService _transactionsService;
+        private readonly IConsumerGasLimitsService _gasLimitsService;
         private readonly IPersonalBridge _personalBridge;
         private readonly ITimestamper _timestamper;
 
         public NdmRpcConsumerModule(IConsumerService consumerService, IDepositReportService depositReportService,
             IJsonRpcNdmConsumerChannel jsonRpcNdmConsumerChannel, IEthRequestService ethRequestService,
+            IEthPriceService ethPriceService, IGasPriceService gasPriceService,
+            IConsumerTransactionsService transactionsService, IConsumerGasLimitsService gasLimitsService,
             IPersonalBridge personalBridge, ITimestamper timestamper)
         {
             _consumerService = consumerService;
             _depositReportService = depositReportService;
             _jsonRpcNdmConsumerChannel = jsonRpcNdmConsumerChannel;
             _ethRequestService = ethRequestService;
+            _ethPriceService = ethPriceService;
+            _gasPriceService = gasPriceService;
+            _transactionsService = transactionsService;
+            _gasLimitsService = gasLimitsService;
             _personalBridge = personalBridge;
             _timestamper = timestamper;
         }
@@ -133,9 +144,10 @@ namespace Nethermind.DataMarketplace.Consumers.Infrastructure.Rpc
                 : ResultWrapper<DepositDetailsForRpc>.Success(new DepositDetailsForRpc(deposit, timestamp));
         }
 
-        public async Task<ResultWrapper<Keccak>> ndm_makeDeposit(MakeDepositForRpc deposit)
+        public async Task<ResultWrapper<Keccak>> ndm_makeDeposit(MakeDepositForRpc deposit, UInt256? gasPrice = null)
         {
-            var depositId = await _consumerService.MakeDepositAsync(deposit.DataAssetId, deposit.Units, deposit.Value);
+            var depositId = await _consumerService.MakeDepositAsync(deposit.DataAssetId, deposit.Units, deposit.Value,
+                gasPrice);
 
             return depositId is null
                 ? ResultWrapper<Keccak>.Fail("Deposit couldn't be made.")
@@ -155,12 +167,14 @@ namespace Nethermind.DataMarketplace.Consumers.Infrastructure.Rpc
 
         public async Task<ResultWrapper<Keccak>> ndm_enableDataStream(Keccak depositId, string client, string[] args)
             => await _consumerService.EnableDataStreamAsync(depositId, client, args) is null
-                ? ResultWrapper<Keccak>.Fail($"Couldn't enable data stream for deposit: '{depositId}', client: {client}.")
+                ? ResultWrapper<Keccak>.Fail(
+                    $"Couldn't enable data stream for deposit: '{depositId}', client: {client}.")
                 : ResultWrapper<Keccak>.Success(depositId);
 
         public async Task<ResultWrapper<Keccak>> ndm_disableDataStream(Keccak depositId, string client)
             => await _consumerService.DisableDataStreamAsync(depositId, client) is null
-                ? ResultWrapper<Keccak>.Fail($"Couldn't disable data stream for deposit: '{depositId}', client: {client}.")
+                ? ResultWrapper<Keccak>.Fail(
+                    $"Couldn't disable data stream for deposit: '{depositId}', client: {client}.")
                 : ResultWrapper<Keccak>.Success(depositId);
 
         public async Task<ResultWrapper<Keccak>> ndm_disableDataStreams(Keccak depositId)
@@ -210,5 +224,64 @@ namespace Nethermind.DataMarketplace.Consumers.Infrastructure.Rpc
 
             return ResultWrapper<string>.Success(data);
         }
+
+        public async Task<ResultWrapper<NdmProxyResponseForRpc>> ndm_getProxy()
+        {
+            var proxy = await _consumerService.GetProxyAsync();
+
+            return ResultWrapper<NdmProxyResponseForRpc>.Success(new NdmProxyResponseForRpc
+            {
+                Enabled = proxy.Enabled,
+                Urls = proxy.Urls
+            });
+        }
+
+        public async Task<ResultWrapper<bool>> ndm_setProxy(string[] urls)
+        {
+            await _consumerService.SetProxyAsync(urls);
+
+            return ResultWrapper<bool>.Success(true);
+        }
+
+        public ResultWrapper<EthUsdPriceForRpc> ndm_getEthUsdPrice()
+            => ResultWrapper<EthUsdPriceForRpc>.Success(new EthUsdPriceForRpc(_ethPriceService.UsdPrice,
+                _ethPriceService.UpdatedAt));
+
+        public ResultWrapper<GasPriceTypesForRpc> ndm_getGasPrice()
+            => _gasPriceService.Types is null
+                ? ResultWrapper<GasPriceTypesForRpc>.Fail("Gas price couldn't be requested.")
+                : ResultWrapper<GasPriceTypesForRpc>.Success(new GasPriceTypesForRpc(_gasPriceService.Types));
+
+        public async Task<ResultWrapper<bool>> ndm_setGasPrice(string gasPriceOrType)
+        {
+            await _gasPriceService.SetAsync(gasPriceOrType);
+
+            return ResultWrapper<bool>.Success(true);
+        }
+
+        public async Task<ResultWrapper<Keccak>> ndm_updateDepositGasPrice(Keccak depositId, UInt256 gasPrice)
+            => ResultWrapper<Keccak>.Success(await _transactionsService
+                .UpdateDepositGasPriceAsync(depositId, gasPrice));
+
+        public async Task<ResultWrapper<Keccak>> ndm_updateRefundGasPrice(Keccak depositId, UInt256 gasPrice)
+            => ResultWrapper<Keccak>.Success(await _transactionsService
+                .UpdateRefundGasPriceAsync(depositId, gasPrice));
+
+        public async Task<ResultWrapper<Keccak>> ndm_cancelDeposit(Keccak depositId)
+            => ResultWrapper<Keccak>.Success(await _transactionsService.CancelDepositAsync(depositId));
+
+        public async Task<ResultWrapper<Keccak>> ndm_cancelRefund(Keccak depositId)
+            => ResultWrapper<Keccak>.Success(await _transactionsService.CancelRefundAsync(depositId));
+
+        public async Task<ResultWrapper<IEnumerable<PendingTransactionForRpc>>> ndm_getConsumerPendingTransactions()
+        {
+            var transactions = await _transactionsService.GetPendingAsync();
+
+            return ResultWrapper<IEnumerable<PendingTransactionForRpc>>.Success(transactions
+                .Select(t => new PendingTransactionForRpc(t)));
+        }
+
+        public ResultWrapper<GasLimitsForRpc> ndm_getConsumerGasLimits()
+            => ResultWrapper<GasLimitsForRpc>.Success(new GasLimitsForRpc(_gasLimitsService.GasLimits));
     }
 }

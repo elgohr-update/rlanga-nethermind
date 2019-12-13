@@ -17,6 +17,9 @@
  */
 
 using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.Serialization.Formatters;
 using FluentAssertions;
@@ -24,6 +27,9 @@ using Nethermind.AuRa.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs.ChainSpecStyle;
+using Nethermind.Core.Test.Builders;
+using Nethermind.Logging;
+using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using NUnit.Framework;
 
@@ -31,53 +37,71 @@ namespace Nethermind.AuRa.Test.Validators
 {
     public class ListValidatorTests
     {
-        private const string Include1 = "0xffffffffffffffffffffffffffffffffffffffff";
-        private const string Include2 = "0xfffffffffffffffffffffffffffffffffffffffe";
-        
-        [TestCase(Include1, ExpectedResult = true)]
-        [TestCase(Include2, ExpectedResult = true)]
-        [TestCase("0xAAfffffffffffffffffffffffffffffffffffffe", ExpectedResult = false)]
-        [TestCase("0xfffffffffffffffffffffffffffffffffffffffd", ExpectedResult = false)]
-        public bool should_validate_correctly(string address)
+        private ListValidator GetListValidator(params Address[] address)
         {
+            var logManager = Substitute.For<ILogManager>();
             var validator = new ListValidator(
                 new AuRaParameters.Validator()
                 {
-                    Addresses = new[] {new Address(Include1), new Address(Include2), }
-                });
-
-            return validator.IsValidSealer(new Address(address));
+                    ValidatorType = AuRaParameters.ValidatorType.List,
+                    Addresses = address
+                }, logManager);
+            
+            return validator;
         }
+
+        private static IEnumerable ValidateTestCases
+        {
+            get
+            {
+                yield return new TestCaseData(TestItem.AddressA, 0L) {ExpectedResult = true};
+                yield return new TestCaseData(TestItem.AddressA, 1L) {ExpectedResult = false};
+                yield return new TestCaseData(TestItem.AddressB, 1L) {ExpectedResult = true};
+                yield return new TestCaseData(TestItem.AddressB, 0L) {ExpectedResult = false};
+                yield return new TestCaseData(TestItem.AddressC, 0L) {ExpectedResult = false};
+                yield return new TestCaseData(TestItem.AddressC, 1L) {ExpectedResult = false};
+            }
+        }
+        
+        [TestCaseSource(nameof(ValidateTestCases))]
+        public bool should_validate_correctly(Address address, long index) =>
+            GetListValidator(TestItem.AddressA, TestItem.AddressB)
+                .IsValidSealer(address, index);
+
+        [TestCase(1)]
+        [TestCase(2)]
+        [TestCase(4)]
+        [TestCase(10)]
+        public void should_get_current_sealers_count(int validatorCount)
+        {
+            GetListValidator(TestItem.Addresses.Take(validatorCount).ToArray())
+                .CurrentSealersCount.Should().Be(validatorCount);
+        }
+        
+        [TestCase(1, ExpectedResult = 1)]
+        [TestCase(2, ExpectedResult = 2)]
+        [TestCase(3, ExpectedResult = 2)]
+        [TestCase(4, ExpectedResult = 3)]
+        [TestCase(5, ExpectedResult = 3)]
+        [TestCase(6, ExpectedResult = 4)]
+        [TestCase(9, ExpectedResult = 5)]
+        [TestCase(10, ExpectedResult = 6)]
+        [TestCase(100, ExpectedResult = 51)]
+        public int should_get_min_sealers_for_finalization(int validatorCount) => 
+            GetListValidator(TestItem.Addresses.Take(validatorCount).ToArray()).MinSealersForFinalization;
 
         [Test]
         public void throws_ArgumentNullException_on_empty_validator()
         {
-            Action act = () => new ListValidator(null);
+            var logManager = Substitute.For<ILogManager>();
+            Action act = () => new ListValidator(null, logManager); 
             act.Should().Throw<ArgumentNullException>();
-        }
-        
-        [Test]
-        public void throws_ArgumentException_on_wrong_validator_type()
-        {
-            Action act = () => new ListValidator(
-                new AuRaParameters.Validator()
-                {
-                    ValidatorType = AuRaParameters.ValidatorType.Contract,
-                    Addresses = new[] {Address.Zero}
-                });
-            
-            act.Should().Throw<ArgumentException>();
         }
         
         [Test]
         public void throws_ArgumentException_on_empty_addresses()
         {
-            Action act = () => new ListValidator(
-                new AuRaParameters.Validator()
-                {
-                    ValidatorType = AuRaParameters.ValidatorType.List
-                });
-            
+            Action act = () => GetListValidator();
             act.Should().Throw<ArgumentException>();
         }
     }

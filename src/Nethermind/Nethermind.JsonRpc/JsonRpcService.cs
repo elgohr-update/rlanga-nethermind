@@ -26,6 +26,7 @@ using Nethermind.Core;
 using Nethermind.Core.Json;
 using Nethermind.Core.Model;
 using Nethermind.Dirichlet.Numerics;
+using Nethermind.JsonRpc.Data;
 using Nethermind.JsonRpc.Modules;
 using Nethermind.Logging;
 using Newtonsoft.Json;
@@ -53,29 +54,32 @@ namespace Nethermind.JsonRpc
         private readonly IRpcModuleProvider _rpcModuleProvider;
         private readonly JsonSerializer _serializer;
 
-        private Dictionary<Type, JsonConverter> _converterLookup = new Dictionary<Type, JsonConverter>();
-
         public JsonRpcService(IRpcModuleProvider rpcModuleProvider, ILogManager logManager)
         {
             _logger = logManager.GetClassLogger();
             _rpcModuleProvider = rpcModuleProvider;
             _serializer = new JsonSerializer();
 
+            List<JsonConverter> converterList = new List<JsonConverter>();
             foreach (JsonConverter converter in rpcModuleProvider.Converters)
             {
                 if (_logger.IsDebug) _logger.Debug($"Registering {converter.GetType().Name} inside {nameof(JsonRpcService)}");
                 _serializer.Converters.Add(converter);
-                _converterLookup.Add(converter.GetType().BaseType.GenericTypeArguments[0], converter);
-                Converters.Add(converter);
+                converterList.Add(converter);
             }
 
             foreach (JsonConverter converter in EthereumJsonSerializer.BasicConverters)
             {
                 if (_logger.IsDebug) _logger.Debug($"Registering {converter.GetType().Name} (default)");
                 _serializer.Converters.Add(converter);
-                _converterLookup.Add(converter.GetType().BaseType.GenericTypeArguments[0], converter);
-                Converters.Add(converter);
+                converterList.Add(converter);
             }
+
+            BlockParameterConverter blockParameterConverter = new BlockParameterConverter();
+            _serializer.Converters.Add(blockParameterConverter);
+            converterList.Add(blockParameterConverter);
+
+            Converters = converterList.ToArray();
         }
 
         public async Task<JsonRpcResponse> SendRequestAsync(JsonRpcRequest rpcRequest)
@@ -95,12 +99,12 @@ namespace Nethermind.JsonRpc
                 catch (TargetInvocationException ex)
                 {
                     if (_logger.IsError) _logger.Error($"Error during method execution, request: {rpcRequest}", ex.InnerException);
-                    return GetErrorResponse(ErrorType.InternalError, ex.InnerException.ToString(), rpcRequest.Id, rpcRequest.Method);
+                    return GetErrorResponse(ErrorType.InternalError, ex.InnerException?.ToString(), rpcRequest.Id, rpcRequest.Method);
                 }
                 catch (Exception ex)
                 {
                     if (_logger.IsError) _logger.Error($"Error during method execution, request: {rpcRequest}", ex);
-                    return GetErrorResponse(ErrorType.InternalError, ex.InnerException.ToString(), rpcRequest.Id, rpcRequest.Method);
+                    return GetErrorResponse(ErrorType.InternalError, ex.InnerException?.ToString(), rpcRequest.Id, rpcRequest.Method);
                 }
             }
             catch (Exception ex)
@@ -115,7 +119,7 @@ namespace Nethermind.JsonRpc
             var methodName = rpcRequest.Method.Trim().ToLower();
 
             var result = _rpcModuleProvider.Resolve(methodName);
-            if (result != null)
+            if (result.MethodInfo != null)
             {
                 return await ExecuteAsync(rpcRequest, methodName, result);
             }
@@ -123,12 +127,12 @@ namespace Nethermind.JsonRpc
             return GetErrorResponse(ErrorType.MethodNotFound, $"Method {rpcRequest.Method} is not supported", rpcRequest.Id, methodName);
         }
 
-        private async Task<JsonRpcResponse> ExecuteAsync(JsonRpcRequest request, string methodName, MethodInfo method)
+        private async Task<JsonRpcResponse> ExecuteAsync(JsonRpcRequest request, string methodName, (MethodInfo Info, bool ReadOnly) method)
         {
-            var expectedParameters = method.GetParameters();
+            var expectedParameters = method.Info.GetParameters();
             var providedParameters = request.Params;
-            if(_logger.IsInfo) _logger.Info($"Executing JSON RPC call {methodName} with params {string.Join(',', providedParameters)}");
-            
+            if (_logger.IsInfo) _logger.Info($"Executing JSON RPC call {methodName} with params {(providedParameters == null ? string.Empty : string.Join(',', providedParameters))}");
+
             int missingParamsCount = expectedParameters.Length - (providedParameters?.Length ?? 0) + providedParameters?.Count(string.IsNullOrWhiteSpace) ?? 0;
 
             if (missingParamsCount != 0)
@@ -160,17 +164,17 @@ namespace Nethermind.JsonRpc
                 parameters = DeserializeParameters(expectedParameters, providedParameters, missingParamsCount);
                 if (parameters == null)
                 {
-                    if (_logger.IsError) _logger.Error($"Incorrect JSON RPC parameters when calling {methodName}: {string.Join(", ", providedParameters)}");
+                    if (_logger.IsWarn) _logger.Warn($"Incorrect JSON RPC parameters when calling {methodName}: {string.Join(", ", providedParameters ?? new string[0])}");
                     return GetErrorResponse(ErrorType.InvalidParams, "Incorrect parameters", request.Id, methodName);
                 }
             }
 
             //execute method
             IResultWrapper resultWrapper = null;
-            IModule module = _rpcModuleProvider.Rent(methodName);
+            IModule module = _rpcModuleProvider.Rent(methodName, method.ReadOnly);
             try
             {
-                var invocationResult = method.Invoke(module, parameters);
+                var invocationResult = method.Info.Invoke(module, parameters);
                 if (invocationResult is IResultWrapper wrapper)
                 {
                     resultWrapper = wrapper;
@@ -194,9 +198,13 @@ namespace Nethermind.JsonRpc
             }
 
             Result result = resultWrapper.GetResult();
-            if (result == null || result.ResultType == ResultType.Failure)
+            if (result == null)
             {
-                if (_logger.IsError) _logger.Error($"Error during method: {methodName} execution: {result?.Error ?? "no result"}");
+                if (_logger.IsError) _logger.Error($"Error during method: {methodName} execution: no result");   
+            }
+            
+            if (result.ResultType == ResultType.Failure)
+            {
                 return GetErrorResponse(resultWrapper.GetErrorType(), resultWrapper.GetResult().Error, request.Id, methodName, resultWrapper.GetData());
             }
 
@@ -237,11 +245,11 @@ namespace Nethermind.JsonRpc
                     {
                         if (providedParameter.StartsWith('[') || providedParameter.StartsWith('{'))
                         {
-                            executionParam = JsonConvert.DeserializeObject(providedParameter, paramType, Converters.ToArray());
+                            executionParam = _serializer.Deserialize(new JsonTextReader(new StringReader(providedParameter)), paramType);
                         }
                         else
                         {
-                            executionParam = JsonConvert.DeserializeObject($"\"{providedParameter}\"", paramType, Converters.ToArray());
+                            executionParam = _serializer.Deserialize(new JsonTextReader(new StringReader($"\"{providedParameter}\"")), paramType);
                         }
                     }
 
@@ -257,12 +265,12 @@ namespace Nethermind.JsonRpc
             }
             catch (Exception e)
             {
-                if (_logger.IsError) _logger.Error("Error while parsing parameters", e);
+                if (_logger.IsWarn) _logger.Warn("Error while parsing JSON RPC request parameters " + e);
                 return null;
             }
         }
 
-        private JsonRpcResponse GetSuccessResponse(object result, UInt256 id)
+        private JsonRpcResponse GetSuccessResponse(object result, object id)
         {
             var response = new JsonRpcResponse
             {
@@ -279,9 +287,9 @@ namespace Nethermind.JsonRpc
             return GetErrorResponse(errorType, message, 0, null);
         }
 
-        public IList<JsonConverter> Converters { get; } = new List<JsonConverter>();
+        public JsonConverter[] Converters { get; }
 
-        private JsonRpcErrorResponse GetErrorResponse(ErrorType errorType, string message, UInt256 id, string methodName, object result = null)
+        private JsonRpcErrorResponse GetErrorResponse(ErrorType errorType, string message, object id, string methodName, object result = null)
         {
             if (_logger.IsDebug) _logger.Debug($"Sending error response, method: {methodName ?? "none"}, id: {id}, errorType: {errorType}, message: {message}");
             var response = new JsonRpcErrorResponse

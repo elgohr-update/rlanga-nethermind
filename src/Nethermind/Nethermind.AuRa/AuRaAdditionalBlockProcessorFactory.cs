@@ -23,6 +23,7 @@ using Nethermind.Abi;
 using Nethermind.AuRa.Contracts;
 using Nethermind.AuRa.Validators;
 using Nethermind.Blockchain;
+using Nethermind.Blockchain.Receipts;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
@@ -40,13 +41,14 @@ namespace Nethermind.AuRa
 {
     public class AuRaAdditionalBlockProcessorFactory : IAuRaAdditionalBlockProcessorFactory
     {
-        private const long DefaultStartBlockNumber = 0;
+        private const long DefaultStartBlockNumber = 1;
         
         private readonly IStateProvider _stateProvider;
         private readonly IAbiEncoder _abiEncoder;
         private readonly IDb _stateDb;
         private readonly ITransactionProcessor _transactionProcessor;
         private readonly IBlockTree _blockTree;
+        private readonly IReceiptStorage _receiptStorage;
         private readonly ILogManager _logManager;
 
         public AuRaAdditionalBlockProcessorFactory(
@@ -55,6 +57,7 @@ namespace Nethermind.AuRa
             IAbiEncoder abiEncoder,
             ITransactionProcessor transactionProcessor,
             IBlockTree blockTree,
+            IReceiptStorage receiptStorage,
             ILogManager logManager)
         {
             _stateProvider = stateProvider;
@@ -62,6 +65,7 @@ namespace Nethermind.AuRa
             _stateDb = stateDb;
             _transactionProcessor = transactionProcessor;
             _blockTree = blockTree;
+            _receiptStorage = receiptStorage;
             _logManager = logManager;
         }
 
@@ -71,13 +75,13 @@ namespace Nethermind.AuRa
             switch (validator.ValidatorType)
             {
                 case AuRaParameters.ValidatorType.List:
-                    return new ListValidator(validator);
+                    return new ListValidator(validator, _logManager);
                 case AuRaParameters.ValidatorType.Contract:
-                    return new ContractValidator(validator, _stateDb, _stateProvider, _abiEncoder, _transactionProcessor, _blockTree, _logManager, startBlockNumber);
+                    return new ContractValidator(validator, _stateDb, _stateProvider, _abiEncoder, _transactionProcessor, _blockTree, _receiptStorage, _logManager, startBlockNumber);
                 case AuRaParameters.ValidatorType.ReportingContract:
-                    return new ReportingContractValidator(validator, _stateDb, _stateProvider, _abiEncoder, _transactionProcessor, _blockTree, _logManager, startBlockNumber);
+                    return new ReportingContractValidator(validator, _stateDb, _stateProvider, _abiEncoder, _transactionProcessor, _blockTree, _receiptStorage, _logManager, startBlockNumber);
                 case AuRaParameters.ValidatorType.Multi:
-                    return new MultiValidator(validator, this, _logManager);
+                    return new MultiValidator(validator, this, _blockTree, _logManager);
                 default:
                     throw new ArgumentOutOfRangeException();
             }
