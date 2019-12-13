@@ -16,27 +16,23 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Extensions;
-using Nethermind.Core.Model;
 
 namespace Nethermind.Network.Discovery.Messages
 {
     public class NodeIdResolver : INodeIdResolver
     {
-        private readonly ISigner _signer;
+        private readonly IEcdsa _ecdsa;
 
-        public NodeIdResolver(ISigner signer)
+        public NodeIdResolver(IEcdsa ecdsa)
         {
-            _signer = signer;
+            _ecdsa = ecdsa;
         }
 
-        public NodeId GetNodeId(byte[] signature, int recoveryId, byte[] messageType, byte[] data)
+        public PublicKey GetNodeId(byte[] signature, int recoveryId, Span<byte> typeAndData)
         {
-            //return _signer.RecoverPublicKey(discoveryMessage.Signature, Keccak.Compute(Bytes.Concat(new[] {(byte)discoveryMessage.MessageType}, discoveryMessage.Payload)));
-
-            var key = _signer.RecoverPublicKey(new Signature(signature, recoveryId), Keccak.Compute(Bytes.Concat(messageType, data)));
-            return key != null ? new NodeId(key) : null;
+            return _ecdsa.RecoverPublicKey(new Signature(signature, recoveryId), Keccak.Compute(typeAndData));   
         }
     }
 }

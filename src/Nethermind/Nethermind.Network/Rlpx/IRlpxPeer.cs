@@ -18,16 +18,19 @@
 
 using System;
 using System.Threading.Tasks;
-using Nethermind.Core.Model;
-using Nethermind.Stats;
+using Nethermind.Core.Crypto;
+using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.Rlpx
 {
     public interface IRlpxPeer
     {
         Task Init();
-        Task ConnectAsync(NodeId remoteId, string host, int port, INodeStats nodeStats);
+        Task ConnectAsync(Node node);
         Task Shutdown();
+        PublicKey LocalNodeId { get; }
+        int LocalPort { get; }
+
         event EventHandler<SessionEventArgs> SessionCreated;
     }
 }

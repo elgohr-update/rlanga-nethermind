@@ -40,7 +40,12 @@ namespace Nethermind.Blockchain.Filters
             return Array.Empty<T>();
         }
 
-        public BlockFilter CreateBlockFilter(UInt256 startBlockNumber, bool setId = true)
+        public BlockFilter CreateBlockFilter(long startBlockNumber, bool setId = true)
+        {
+            throw new InvalidOperationException($"{nameof(NullFilterStore)} does not support filter creation");
+        }
+
+        public PendingTransactionFilter CreatePendingTransactionFilter(bool setId = true)
         {
             throw new InvalidOperationException($"{nameof(NullFilterStore)} does not support filter creation");
         }

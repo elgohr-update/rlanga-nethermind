@@ -22,8 +22,9 @@ using System.Net.Sockets;
 using DotNetty.Buffers;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
+using Nethermind.Core;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
+using Nethermind.Logging;
 using Nethermind.Network.Discovery.Messages;
 
 namespace Nethermind.Network.Discovery
@@ -34,13 +35,15 @@ namespace Nethermind.Network.Discovery
         private readonly IDiscoveryManager _discoveryManager;
         private readonly IDatagramChannel _channel;
         private readonly IMessageSerializationService _messageSerializationService;
+        private readonly ITimestamper _timestamper;
 
-        public NettyDiscoveryHandler(IDiscoveryManager discoveryManager, IDatagramChannel channel, IMessageSerializationService messageSerializationService, ILogManager logManager)
+        public NettyDiscoveryHandler(IDiscoveryManager discoveryManager, IDatagramChannel channel, IMessageSerializationService messageSerializationService, ITimestamper timestamper, ILogManager logManager)
         {
             _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
             _discoveryManager = discoveryManager ?? throw new ArgumentNullException(nameof(discoveryManager));
             _channel = channel ?? throw new ArgumentNullException(nameof(channel));
             _messageSerializationService = messageSerializationService ?? throw new ArgumentNullException(nameof(messageSerializationService));
+            _timestamper = timestamper ?? throw new ArgumentNullException(nameof(timestamper));
         }
 
         public override void ChannelActive(IChannelHandlerContext context)
@@ -60,7 +63,7 @@ namespace Nethermind.Network.Discovery
                 if (_logger.IsError) _logger.Error("Exception when processing discovery messages", exception);
             }
 
-            base.ExceptionCaught(context, exception);
+            context.DisconnectAsync();
         }
 
         public override void ChannelReadComplete(IChannelHandlerContext context)
@@ -75,7 +78,7 @@ namespace Nethermind.Network.Discovery
             try
             {
                 if(_logger.IsTrace) _logger.Trace($"Sending message: {discoveryMessage}");
-                message = Seserialize(discoveryMessage);
+                message = Serialize(discoveryMessage);
             }
             catch (Exception e)
             {
@@ -93,8 +96,6 @@ namespace Nethermind.Network.Discovery
             });
         }
 
-        public event EventHandler OnChannelActivated;
-
         protected override void ChannelRead0(IChannelHandlerContext ctx, DatagramPacket packet)
         {
             var content = packet.Content;
@@ -105,7 +106,8 @@ namespace Nethermind.Network.Discovery
 
             if (msg.Length < 98)
             {
-                _logger.Error($"Incorrect message, length: {msg.Length}, sender: {address}");
+                if(_logger.IsDebug) _logger.Debug($"Incorrect discovery message, length: {msg.Length}, sender: {address}");
+                ctx.DisconnectAsync();
                 return;
             }
             
@@ -113,6 +115,7 @@ namespace Nethermind.Network.Discovery
             if (!Enum.IsDefined(typeof(MessageType), (int)typeRaw))
             {
                 if(_logger.IsDebug) _logger.Debug($"Unsupported message type: {typeRaw}, sender: {address}, message {msg.ToHexString()}");
+                ctx.DisconnectAsync();
                 return;
             }
             
@@ -128,17 +131,40 @@ namespace Nethermind.Network.Discovery
             }
             catch (Exception e)
             {
-                _logger.Error($"Error during deserialization of the message, type: {type}, sender: {address}, msg: {msg.ToHexString()}", e);
+                if(_logger.IsDebug) _logger.Debug($"Error during deserialization of the message, type: {type}, sender: {address}, msg: {msg.ToHexString()}, {e.Message}");
+                ctx.DisconnectAsync();
                 return;
             }
 
             try
             {
+                if ((ulong)message.ExpirationTime < _timestamper.EpochSeconds)
+                {
+                    if(_logger.IsDebug) _logger.Debug($"Received a discovery message that has expired, type: {type}, sender: {address}, message: {message}");
+                    ctx.DisconnectAsync();
+                    return;
+                }
+
+                if (!message.FarAddress.Equals((IPEndPoint)packet.Sender))
+                {
+                    if(_logger.IsDebug) _logger.Debug($"Discovery fake IP detected - pretended {message.FarAddress} but was {ctx.Channel.RemoteAddress}, type: {type}, sender: {address}, message: {message}");
+                    ctx.DisconnectAsync();
+                    return;
+                }
+                
+                if (message.FarPublicKey == null)
+                {
+                    if(_logger.IsDebug) _logger.Debug($"Discovery message without a valid signature {message.FarAddress} but was {ctx.Channel.RemoteAddress}, type: {type}, sender: {address}, message: {message}");
+                    ctx.DisconnectAsync();
+                    return;
+                }
+
                 _discoveryManager.OnIncomingMessage(message);
             }
             catch (Exception e)
             {
-                _logger.Error($"Error while processing message, type: {type}, sender: {address}, message: {message}", e);
+                if(_logger.IsDebug) _logger.Error($"DEBUG/ERROR Error while processing message, type: {type}, sender: {address}, message: {message}", e);
+                ctx.DisconnectAsync();
             }
         }
 
@@ -159,7 +185,7 @@ namespace Nethermind.Network.Discovery
             }
         }
 
-        private byte[] Seserialize(DiscoveryMessage message)
+        private byte[] Serialize(DiscoveryMessage message)
         {
             switch (message.MessageType)
             {
@@ -175,5 +201,7 @@ namespace Nethermind.Network.Discovery
                     throw new Exception($"Unsupported messageType: {message.MessageType}");
             }
         }
+        
+        public event EventHandler OnChannelActivated;
     }
 }

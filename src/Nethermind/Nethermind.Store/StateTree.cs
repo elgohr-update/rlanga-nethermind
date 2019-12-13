@@ -29,6 +29,11 @@ namespace Nethermind.Store
         private readonly AccountDecoder _decoder = new AccountDecoder();
         
         [DebuggerStepThrough]
+        public StateTree() : base(new MemDb(), Keccak.EmptyTreeHash, true)
+        {
+        }
+        
+        [DebuggerStepThrough]
         public StateTree(IDb db) : base(db, Keccak.EmptyTreeHash, true)
         {
         }
@@ -41,13 +46,13 @@ namespace Nethermind.Store
         [DebuggerStepThrough]
         public Account Get(Address address)
         {
-            byte[] bytes = Get(Keccak.Compute(address.Bytes).Bytes);
+            byte[] bytes = Get(ValueKeccak.Compute(address.Bytes).BytesAsSpan);
             if (bytes == null)
             {
                 return null;
             }
 
-            return _decoder.Decode(bytes.AsRlpContext());
+            return _decoder.Decode(bytes.AsRlpStream());
         }
         
         [DebuggerStepThrough]
@@ -59,20 +64,15 @@ namespace Nethermind.Store
                 return null;
             }
 
-            return _decoder.Decode(bytes.AsRlpContext());
+            return _decoder.Decode(bytes.AsRlpStream());
         }
 
         private static readonly Rlp EmptyAccountRlp = Rlp.Encode(Account.TotallyEmpty);
 
         public void Set(Address address, Account account)
         {
-            if (account?.IsTotallyEmpty ?? false)
-            {
-                Metrics.EmptyAccountSaves++;
-            }
-            
-            Keccak keccak = Keccak.Compute(address.Bytes);
-            Set(keccak.Bytes, account == null ? null : account.IsTotallyEmpty ? EmptyAccountRlp : Rlp.Encode(account));
+            ValueKeccak keccak = ValueKeccak.Compute(address.Bytes);
+            Set(keccak.BytesAsSpan, account == null ? null : account.IsTotallyEmpty ? EmptyAccountRlp : Rlp.Encode(account));
         }
         
         [DebuggerStepThrough]

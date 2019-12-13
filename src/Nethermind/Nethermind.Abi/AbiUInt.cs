@@ -19,6 +19,7 @@
 using System;
 using System.Numerics;
 using Nethermind.Core.Extensions;
+using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Abi
 {
@@ -57,35 +58,54 @@ namespace Nethermind.Abi
 
         public override string Name => $"uint{Length}";
 
-        public override (object, int) Decode(byte[] data, int position)
+        public override (object, int) Decode(byte[] data, int position, bool packed)
         {
-            BigInteger lengthData = data.Slice(position, LengthInBytes).ToUnsignedBigInteger();
-            return (lengthData, position + LengthInBytes);
+            BigInteger lengthData = data.Slice(position, (packed ? LengthInBytes : UInt256.LengthInBytes)).ToUnsignedBigInteger();
+            return (lengthData, position + (packed ? LengthInBytes : UInt256.LengthInBytes));
         }
 
-        public (BigInteger, int) DecodeUInt(byte[] data, int position)
+        public (BigInteger, int) DecodeUInt(byte[] data, int position, bool packed)
         {
-            return ((BigInteger, int))Decode(data, position);
+            return ((BigInteger, int)) Decode(data, position, packed);
         }
 
-        public override byte[] Encode(object arg)
+        public override byte[] Encode(object arg, bool packed)
         {
-            if (arg is BigInteger input)
+            byte[] bytes = null;
+            if (arg is UInt256 uint256)
             {
-                return input.ToBigEndianByteArray().PadLeft(UInt.LengthInBytes);
+                bytes = ((BigInteger) uint256).ToBigEndianByteArray();
+            }
+            else if (arg is BigInteger bigInteger)
+            {
+                bytes = bigInteger.ToBigEndianByteArray();
+            }
+            else if (arg is int intInput)
+            {
+                bytes = intInput.ToBigEndianByteArray();
+            }
+            else if (arg is uint uintInput)
+            {
+                bytes = uintInput.ToBigEndianByteArray();
+            }
+            else if (arg is long longInput)
+            {
+                bytes = longInput.ToBigEndianByteArray();
+            }
+            else if (arg is short shortInput)
+            {
+                bytes = shortInput.ToBigEndianByteArray();
+            }
+            else if (arg is ushort ushortInput)
+            {
+                bytes = ushortInput.ToBigEndianByteArray();
+            }
+            else
+            {
+                throw new AbiException(AbiEncodingExceptionMessage);
             }
 
-            if (arg is int intInput)
-            {
-                return intInput.ToBigEndianByteArray().PadLeft(UInt.LengthInBytes);
-            }
-
-            if (arg is long longInput)
-            {
-                return longInput.ToBigEndianByteArray().PadLeft(UInt.LengthInBytes);
-            }
-
-            throw new AbiException(AbiEncodingExceptionMessage);
+            return bytes.PadLeft(packed ? LengthInBytes : UInt256.LengthInBytes);
         }
 
         public override Type CSharpType { get; } = typeof(BigInteger);

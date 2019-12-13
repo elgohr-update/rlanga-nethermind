@@ -19,28 +19,48 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.CommandLineUtils;
 using Nethermind.Config;
 using Nethermind.Core;
-using Nethermind.Core.Logging;
-using Nethermind.Core.Specs.ChainSpec;
-using Nethermind.Core.Utils;
-using Nethermind.Network;
-using Nethermind.Network.Config;
+using Nethermind.Core.Json;
+using Nethermind.DataMarketplace.Channels;
+using Nethermind.DataMarketplace.Channels.Grpc;
+using Nethermind.DataMarketplace.Consumers.Infrastructure;
+using Nethermind.DataMarketplace.Core;
+using Nethermind.DataMarketplace.Core.Configs;
+using Nethermind.DataMarketplace.Core.Services;
+using Nethermind.DataMarketplace.Infrastructure.Modules;
+using Nethermind.DataMarketplace.Initializers;
+using Nethermind.DataMarketplace.WebSockets;
+using Nethermind.Grpc;
+using Nethermind.Grpc.Clients;
+using Nethermind.Grpc.Servers;
+using Nethermind.JsonRpc;
+using Nethermind.JsonRpc.Modules;
+using Nethermind.JsonRpc.Modules.Web3;
+using Nethermind.JsonRpc.WebSockets;
+using Nethermind.Monitoring;
+using Nethermind.Monitoring.Metrics;
+using Nethermind.Logging;
+using Nethermind.Monitoring.Config;
 using Nethermind.Runner.Config;
 using Nethermind.Runner.Runners;
+using Nethermind.WebSockets;
 
 namespace Nethermind.Runner
 {
     public abstract class RunnerAppBase
     {
         protected ILogger Logger;
-        private IJsonRpcRunner _jsonRpcRunner = NullRunner.Instance;
-        private IEthereumRunner _ethereumRunner = NullRunner.Instance;
+        private IRunner _jsonRpcRunner = NullRunner.Instance;
+        private IRunner _ethereumRunner = NullRunner.Instance;
+        private IRunner _grpcRunner = NullRunner.Instance;
         private TaskCompletionSource<object> _cancelKeySource;
-
+        private IMonitoringService _monitoringService;
+        
         protected RunnerAppBase(ILogger logger)
         {
             Logger = logger;
@@ -51,53 +71,48 @@ namespace Nethermind.Runner
         {
         }
 
+        private void LogMemoryConfiguration()
+        {
+            if (Logger.IsDebug) Logger.Debug($"Server GC           : {System.Runtime.GCSettings.IsServerGC}");
+            if (Logger.IsDebug) Logger.Debug($"GC latency mode     : {System.Runtime.GCSettings.LatencyMode}");
+            if (Logger.IsDebug)
+                Logger.Debug($"LOH compaction mode : {System.Runtime.GCSettings.LargeObjectHeapCompactionMode}");
+        }
+
         public void Run(string[] args)
         {
             var (app, buildConfigProvider, getDbBasePath) = BuildCommandLineApp();
-            ManualResetEvent appClosed = new ManualResetEvent(false);
+            ManualResetEventSlim appClosed = new ManualResetEventSlim(false);
             app.OnExecute(async () =>
             {
                 var configProvider = buildConfigProvider();
                 var initConfig = configProvider.GetConfig<IInitConfig>();
 
-                if (initConfig.RemovingLogFilesEnabled)
-                {
-                    RemoveLogFiles(initConfig.LogDirectory);
-                }
-
                 Logger = new NLogLogger(initConfig.LogFileName, initConfig.LogDirectory);
+                LogMemoryConfiguration();
 
                 var pathDbPath = getDbBasePath();
                 if (!string.IsNullOrWhiteSpace(pathDbPath))
                 {
                     var newDbPath = Path.Combine(pathDbPath, initConfig.BaseDbPath);
-                    if(Logger.IsInfo) Logger.Info($"Adding prefix to baseDbPath, new value: {newDbPath}, old value: {initConfig.BaseDbPath}");
-                    initConfig.BaseDbPath = newDbPath;
+                    if (Logger.IsDebug) Logger.Debug($"Adding prefix to baseDbPath, new value: {newDbPath}, old value: {initConfig.BaseDbPath}");
+                    initConfig.BaseDbPath = newDbPath ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "db");
                 }
 
                 Console.Title = initConfig.LogFileName;
                 Console.CancelKeyPress += ConsoleOnCancelKeyPress;
 
                 var serializer = new UnforgivingJsonSerializer();
-                if(Logger.IsInfo) Logger.Info($"Running Nethermind Runner, parameters:\n{serializer.Serialize(initConfig, true)}\n");
+                if (Logger.IsInfo)
+                {
+                    Logger.Info($"Nethermind config:\n{serializer.Serialize(initConfig, true)}\n");
+                }
 
                 _cancelKeySource = new TaskCompletionSource<object>();
-                Task userCancelTask = Task.Factory.StartNew(() =>
-                {
-                    Console.WriteLine("Enter 'e' to exit");
-                    while (true)
-                    {
-                        ConsoleKeyInfo keyInfo = Console.ReadKey();
-                        if (keyInfo.KeyChar == 'e')
-                        {
-                            break;
-                        }
-                    }
-                });
 
                 await StartRunners(configProvider);
-                await Task.WhenAny(userCancelTask, _cancelKeySource.Task);
-                                                                                                                                                                                                                                                                                                        
+                await _cancelKeySource.Task;
+
                 Console.WriteLine("Closing, please wait until all functions are stopped properly...");
                 StopAsync().Wait();
                 Console.WriteLine("All done, goodbye!");
@@ -107,57 +122,97 @@ namespace Nethermind.Runner
             });
 
             app.Execute(args);
-            appClosed.WaitOne();
+            appClosed.Wait();
         }
 
         private void ConsoleOnCancelKeyPress(object sender, ConsoleCancelEventArgs e)
         {
-            _cancelKeySource.SetResult(null);
+            _cancelKeySource?.SetResult(null);
             e.Cancel = false;
         }
 
+        [Todo(Improve.Refactor, "network config can be handled internally in EthereumRunner")]
         protected async Task StartRunners(IConfigProvider configProvider)
         {
-            var initParams = configProvider.GetConfig<IInitConfig>();
-            var logManager = new NLogManager(initParams.LogFileName, initParams.LogDirectory);
+            IInitConfig initConfig = configProvider.GetConfig<IInitConfig>();
+            IJsonRpcConfig jsonRpcConfig = configProvider.GetConfig<IJsonRpcConfig>();
+            var metricsParams = configProvider.GetConfig<IMetricsConfig>();
+            var logManager = new NLogManager(initConfig.LogFileName, initConfig.LogDirectory);
+            IRpcModuleProvider rpcModuleProvider = jsonRpcConfig.Enabled
+                ? new RpcModuleProvider(configProvider.GetConfig<IJsonRpcConfig>(), logManager)
+                : (IRpcModuleProvider) NullModuleProvider.Instance;
+            var jsonSerializer = new EthereumJsonSerializer();
+            var webSocketsManager = new WebSocketsManager();
 
-            if (initParams.RunAsReceiptsFiller)
+            INdmDataPublisher ndmDataPublisher = null;
+            INdmConsumerChannelManager ndmConsumerChannelManager = null;
+            INdmInitializer ndmInitializer = null;
+            var ndmConfig = configProvider.GetConfig<INdmConfig>();
+            var ndmEnabled = ndmConfig.Enabled;
+            if (ndmEnabled)
             {
-                _ethereumRunner = new ReceiptsFiller(configProvider, logManager);
+                ndmDataPublisher = new NdmDataPublisher();
+                ndmConsumerChannelManager = new NdmConsumerChannelManager();
+                var initializerName = ndmConfig.InitializerName;
+                if (Logger.IsInfo) Logger.Info($"NDM initializer: {initializerName}");
+                var ndmInitializerType = AppDomain.CurrentDomain.GetAssemblies()
+                    .SelectMany(a => a.GetTypes())
+                    .FirstOrDefault(t =>
+                        t.GetCustomAttribute<NdmInitializerAttribute>()?.Name == initializerName);
+                var ndmModule = new NdmModule();
+                var ndmConsumersModule = new NdmConsumersModule();
+                ndmInitializer = new NdmInitializerFactory(ndmInitializerType, ndmModule, ndmConsumersModule,
+                    logManager).CreateOrFail();
             }
-            else
+
+            var grpcConfig = configProvider.GetConfig<IGrpcConfig>();
+            GrpcServer grpcServer = null;
+            if (grpcConfig.Enabled)
             {
-                //discovering and setting local, remote ips for client machine
-                var networkHelper = new NetworkHelper(Logger);
-                var localHost = networkHelper.GetLocalIp()?.ToString() ?? "127.0.0.1";
-                var networkConfig = configProvider.GetConfig<INetworkConfig>();
-                networkConfig.MasterExternalIp = localHost;
-                networkConfig.MasterHost = localHost;
-
-                string path = initParams.ChainSpecPath;
-                ChainSpecLoader chainSpecLoader = new ChainSpecLoader(new UnforgivingJsonSerializer());
-                ChainSpec chainSpec = chainSpecLoader.LoadFromFile(path);
-
-                var nodes = chainSpec.NetworkNodes.Select(nn => GetNode(nn, localHost)).ToArray();
-                networkConfig.BootNodes = nodes;
-                networkConfig.DbBasePath = initParams.BaseDbPath;
-                _ethereumRunner = new EthereumRunner(configProvider, networkHelper, logManager);
+                grpcServer = new GrpcServer(jsonSerializer, logManager);
+                if (ndmEnabled)
+                {
+                    ndmConsumerChannelManager.Add(new GrpcNdmConsumerChannel(grpcServer));
+                }
+                
+                _grpcRunner = new GrpcRunner(grpcServer, grpcConfig, logManager);
+                await _grpcRunner.Start().ContinueWith(x =>
+                {
+                    if (x.IsFaulted && Logger.IsError) Logger.Error("Error during GRPC runner start", x.Exception);
+                });
             }
-
+            
+            if (initConfig.WebSocketsEnabled)
+            {
+                if (ndmEnabled)
+                {
+                    webSocketsManager.AddModule(new NdmWebSocketsModule(ndmConsumerChannelManager, ndmDataPublisher,
+                        jsonSerializer));
+                }
+            }
+            
+            _ethereumRunner = new EthereumRunner(rpcModuleProvider, configProvider, logManager, grpcServer,
+                ndmConsumerChannelManager, ndmDataPublisher, ndmInitializer, webSocketsManager, jsonSerializer);
             await _ethereumRunner.Start().ContinueWith(x =>
             {
                 if (x.IsFaulted && Logger.IsError) Logger.Error("Error during ethereum runner start", x.Exception);
             });
 
-            if (initParams.JsonRpcEnabled && !initParams.RunAsReceiptsFiller)
+            if (jsonRpcConfig.Enabled)
             {
-                Bootstrap.Instance.ConfigProvider = configProvider;
+                rpcModuleProvider.Register(new SingletonModulePool<IWeb3Module>(new Web3Module(logManager)));
+                var jsonRpcService = new JsonRpcService(rpcModuleProvider, logManager);
+                var jsonRpcProcessor = new JsonRpcProcessor(jsonRpcService, jsonSerializer, logManager);
+                if (initConfig.WebSocketsEnabled)
+                {
+                    webSocketsManager.AddModule(new JsonRpcWebSocketsModule(jsonRpcProcessor, jsonSerializer));
+                }
+                
+                Bootstrap.Instance.JsonRpcService = jsonRpcService;
                 Bootstrap.Instance.LogManager = logManager;
-                Bootstrap.Instance.BlockchainBridge = _ethereumRunner.BlockchainBridge;
-                Bootstrap.Instance.DebugBridge = _ethereumRunner.DebugBridge;
-                Bootstrap.Instance.NetBridge = _ethereumRunner.NetBridge;
-
-                _jsonRpcRunner = new JsonRpcRunner(configProvider, logManager);
+                Bootstrap.Instance.JsonSerializer = jsonSerializer;
+                _jsonRpcRunner = new JsonRpcRunner(configProvider, rpcModuleProvider, logManager, jsonRpcProcessor,
+                    webSocketsManager);
                 await _jsonRpcRunner.Start().ContinueWith(x =>
                 {
                     if (x.IsFaulted && Logger.IsError) Logger.Error("Error during jsonRpc runner start", x.Exception);
@@ -167,51 +222,33 @@ namespace Nethermind.Runner
             {
                 if (Logger.IsInfo) Logger.Info("Json RPC is disabled");
             }
+
+            if (metricsParams.Enabled)
+            {
+                var intervalSeconds = metricsParams.IntervalSeconds;
+                _monitoringService = new MonitoringService(new MetricsUpdater(intervalSeconds),
+                    metricsParams.PushGatewayUrl, ClientVersion.Description,
+                    metricsParams.NodeName, intervalSeconds, logManager);
+                await _monitoringService.StartAsync().ContinueWith(x =>
+                {
+                    if (x.IsFaulted && Logger.IsError) Logger.Error("Error during starting a monitoring.", x.Exception);
+                });
+            }
+            else
+            {
+                if (Logger.IsInfo) Logger.Info("Monitoring is disabled");
+            }
         }
 
         protected abstract (CommandLineApplication, Func<IConfigProvider>, Func<string>) BuildCommandLineApp();
 
         protected async Task StopAsync()
         {
+            _grpcRunner?.StopAsync();
+            _monitoringService?.StopAsync();
             _jsonRpcRunner?.StopAsync(); // do not await
             var ethereumTask = _ethereumRunner?.StopAsync() ?? Task.CompletedTask;
             await ethereumTask;
-        }
-
-        private ConfigNode GetNode(NetworkNode networkNode, string localHost)
-        {
-            var node = new ConfigNode
-            {
-                NodeId = networkNode.NodeId.PublicKey.ToString(false),
-                Host = networkNode.Host == "127.0.0.1" ? localHost : networkNode.Host,
-                Port = networkNode.Port,
-                Description = networkNode.Description
-            };
-            return node;
-        }
-
-        private void RemoveLogFiles(string logDirectory)
-        {
-            Console.WriteLine("Removing log files.");
-
-            var logsDir = string.IsNullOrEmpty(logDirectory) ? Path.Combine(PathUtils.GetExecutingDirectory(), "logs") : logDirectory;
-            if (!Directory.Exists(logsDir))
-            {
-                return;
-            }
-
-            var files = Directory.GetFiles(logsDir);
-            foreach (string file in files)
-            {
-                try
-                {
-                    File.Delete(file);
-                }
-                catch (Exception e)
-                {
-                    Console.WriteLine($"Error removing log file: {file}, exp: {e}");
-                }
-            }
         }
     }
 }

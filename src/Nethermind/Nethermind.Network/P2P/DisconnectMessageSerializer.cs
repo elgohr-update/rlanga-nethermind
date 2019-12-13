@@ -16,8 +16,10 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System.Linq;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
+using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.P2P
 {
@@ -30,11 +32,29 @@ namespace Nethermind.Network.P2P
             ).Bytes;
         }
 
+        private byte[] breach1 = Bytes.FromHexString("0204c104");
+        private byte[] breach2 = Bytes.FromHexString("0204c180");
+
         public DisconnectMessage Deserialize(byte[] bytes)
         {
-            Rlp.DecoderContext context = bytes.AsRlpContext();
-            context.ReadSequenceLength();
-            int reason = context.DecodeInt();
+            if (bytes.Length == 1)
+            {
+                return new DisconnectMessage((DisconnectReason)bytes[0]);
+            }
+
+            if (bytes.SequenceEqual(breach1))
+            {
+                return new DisconnectMessage(DisconnectReason.Breach1);
+            }
+            
+            if (bytes.SequenceEqual(breach2))
+            {
+                return new DisconnectMessage(DisconnectReason.Breach2);
+            }
+            
+            RlpStream rlpStream = bytes.AsRlpStream();
+            rlpStream.ReadSequenceLength();
+            int reason = rlpStream.DecodeInt();
             DisconnectMessage disconnectMessage = new DisconnectMessage(reason);
             return disconnectMessage;
         }

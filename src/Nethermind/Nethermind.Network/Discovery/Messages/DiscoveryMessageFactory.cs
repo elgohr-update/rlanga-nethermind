@@ -17,31 +17,31 @@
  */
 
 using System;
-using Nethermind.Config;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Network.Config;
 using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.Discovery.Messages
 {
     public class DiscoveryMessageFactory : IDiscoveryMessageFactory
     {
-        private readonly ITimestamp _timestamp;
-        private readonly INetworkConfig _configurationProvider;
+        /// <summary>
+        /// This is the value set by other clients based on real network tests.
+        /// </summary>
+        private const int ExpirationTimeInSeconds = 20;
+        
+        private readonly ITimestamper _timestamper;
 
-        public DiscoveryMessageFactory(IConfigProvider configurationProvider, ITimestamp timestamp)
+        public DiscoveryMessageFactory(ITimestamper timestamper)
         {
-            _timestamp = timestamp;
-            _configurationProvider = configurationProvider.GetConfig<INetworkConfig>();
+            _timestamper = timestamper;
         }
 
         public T CreateOutgoingMessage<T>(Node destination) where T : DiscoveryMessage
         {
             T message = Activator.CreateInstance<T>();
             message.FarAddress = destination.Address;
-            message.ExpirationTime = _configurationProvider.DiscoveryMsgExpiryTime +
-                                     (long) _timestamp.EpochMilliseconds;
+            message.ExpirationTime = ExpirationTimeInSeconds + (long) _timestamper.EpochSeconds;
             return message;
         }
 

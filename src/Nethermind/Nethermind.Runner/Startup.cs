@@ -19,35 +19,55 @@
 using System;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Nethermind.Config;
+using Nethermind.Runner.Config;
+using Nethermind.WebSockets;
 
 namespace Nethermind.Runner
 {
     public class Startup
     {
+        public IConfiguration Configuration { get; }
+
+
         public Startup(IConfiguration configuration)
         {
             Configuration = configuration;
         }
 
-        public IConfiguration Configuration { get; }
-
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddMvc().SetCompatibilityVersion(CompatibilityVersion.Version_2_1);
+            services.AddMvc().AddNewtonsoftJson();
+            services.Configure<KestrelServerOptions>(options => { options.AllowSynchronousIO = true; });
             Bootstrap.Instance.RegisterJsonRpcServices(services);
-        }       
+            var corsOrigins = Environment.GetEnvironmentVariable("NETHERMIND_CORS_ORIGINS") ?? "*";
+            services.AddCors(c => c.AddPolicy("Cors",
+                p => p.AllowAnyMethod().AllowAnyHeader().WithOrigins(corsOrigins)));
+        }
 
-        public void Configure(IApplicationBuilder app, IHostingEnvironment env)
+        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
+            var config = app.ApplicationServices.GetService<IConfigProvider>().GetConfig<IInitConfig>();
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
             }
-            app.UseMvc();
+
+            app.UseCors("Cors");
+            if (config.WebSocketsEnabled)
+            {
+                app.UseWebSocketsModules();
+            }
+            
+            app.UseRouting();
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapControllers();
+            });
         }
     }
 }

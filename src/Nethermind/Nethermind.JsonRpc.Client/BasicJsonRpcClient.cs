@@ -18,13 +18,14 @@
 
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 using Nethermind.Core;
-using Nethermind.Core.Logging;
+using Nethermind.Logging;
 
 namespace Nethermind.JsonRpc.Client
 {
@@ -39,7 +40,6 @@ namespace Nethermind.JsonRpc.Client
             _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
             _jsonSerializer = jsonSerializer;
 
-//            _client = new HttpClient {BaseAddress = new Uri("http://94.237.51.104:8345")}; // neth vm1
             _client = new HttpClient {BaseAddress = uri};
             _client.DefaultRequestHeaders.Accept.Clear();
             _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -47,17 +47,45 @@ namespace Nethermind.JsonRpc.Client
 
         public async Task<string> Post(string method, params object[] parameters)
         {
+            string request = GetJsonRequest(method, parameters);
+            HttpResponseMessage response = await _client.PostAsync("", new StringContent(request, Encoding.UTF8, "application/json"));
+            string content = await response.Content.ReadAsStringAsync();
+            return content;
+        }
+
+        public async Task<T> Post<T>(string method, params object[] parameters)
+        {
+            string responseString = string.Empty;
             try
             {
                 string request = GetJsonRequest(method, parameters);
                 HttpResponseMessage response = await _client.PostAsync("", new StringContent(request, Encoding.UTF8, "application/json"));
-                string content = await response.Content.ReadAsStringAsync();
-                return content;
+                responseString = await response.Content.ReadAsStringAsync();
+                if(_logger.IsTrace) _logger.Trace(responseString);
+
+                JsonRpcResponse<T> jsonResponse = _jsonSerializer.Deserialize<JsonRpcResponse<T>>(responseString);
+                if (jsonResponse.Error != null)
+                {
+                    if(_logger.IsError) _logger.Error(string.Concat(jsonResponse.Error.Message, " | ", jsonResponse.Error.Data));
+                }
+                
+                return jsonResponse.Result;
             }
-            catch (Exception e)
+            catch (NotImplementedException)
             {
-                _logger.Error($"Error during execution of {method}", e);
-                return $"Error: {e.Message}";
+                throw;
+            }
+            catch (NotSupportedException)
+            {
+                throw;
+            }
+            catch (HttpRequestException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                throw new DataException($"Cannot deserialize {responseString}");
             }
         }
 
@@ -67,7 +95,7 @@ namespace Nethermind.JsonRpc.Client
             {
                 jsonrpc = "2.0",
                 method,
-                Params = parameters ?? Enumerable.Empty<object>(),
+                @params = parameters ?? Enumerable.Empty<object>(),
                 id = 67
             };
 

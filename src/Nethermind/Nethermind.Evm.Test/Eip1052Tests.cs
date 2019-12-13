@@ -30,22 +30,24 @@ namespace Nethermind.Evm.Test
     [TestFixture]
     public class Eip1052Tests : VirtualMachineTestsBase
     {
-        protected override UInt256 BlockNumber => MainNetSpecProvider.ConstantinopleBlockNumber;
+        protected override long BlockNumber => RopstenSpecProvider.ConstantinopleBlockNumber;
+        
+        protected override ISpecProvider SpecProvider => RopstenSpecProvider.Instance;
 
         [Test]
         public void Account_without_code_returns_empty_data_hash()
         {
-            TestState.CreateAccount(TestObject.AddressC, 100.Ether());
+            TestState.CreateAccount(TestItem.AddressC, 100.Ether());
 
             byte[] code = Prepare.EvmCode
-                .PushData(TestObject.AddressC)
+                .PushData(TestItem.AddressC)
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)
                 .Done;
 
-            TransactionReceipt receipt = Execute(code);
-            AssertGas(receipt, GasCostOf.Transaction + GasCostOf.VeryLow * 2 + GasCostOf.SSet + GasCostOf.ExtCodeHash);
+            var result = Execute(code);
+            AssertGas(result, 21000 + GasCostOf.VeryLow * 2 + GasCostOf.SSet + GasCostOf.ExtCodeHash);
             AssertStorage(UInt256.Zero, Keccak.OfAnEmptyString.Bytes);
         }
 
@@ -53,15 +55,15 @@ namespace Nethermind.Evm.Test
         public void Non_existing_account_returns_0()
         {
             byte[] code = Prepare.EvmCode
-                .PushData(TestObject.AddressC)
+                .PushData(TestItem.AddressC)
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)
                 .Done;
 
-            TransactionReceipt receipt = Execute(code);
-            AssertGas(receipt,
-                GasCostOf.Transaction + GasCostOf.VeryLow * 2 + GasCostOf.SStoreEip1283 + GasCostOf.ExtCodeHash);
+            var result = Execute(code);
+            AssertGas(result,
+                21000 + GasCostOf.VeryLow * 2 + GasCostOf.SStoreNetMeteredEip1283 + GasCostOf.ExtCodeHash);
             AssertStorage(UInt256.Zero, Keccak.Zero);
         }
 
@@ -105,28 +107,28 @@ namespace Nethermind.Evm.Test
         public void Before_constantinople_throws_an_exception()
         {
             byte[] code = Prepare.EvmCode
-                .PushData(TestObject.AddressC)
+                .PushData(TestItem.AddressC)
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)
                 .Done;
 
-            TransactionReceipt receipt = Execute(1000000, 100000, code);
+            var receipt = Execute(1000000, 100000, code);
             Assert.AreEqual(StatusCode.Failure, receipt.StatusCode);
         }
 
         [Test]
         public void Addresses_are_trimmed_properly()
         {
-            byte[] addressWithGarbage = TestObject.AddressC.Bytes.PadLeft(32);
+            byte[] addressWithGarbage = TestItem.AddressC.Bytes.PadLeft(32);
             addressWithGarbage[11] = 88;
 
-            TestState.CreateAccount(TestObject.AddressC, 1.Ether());
+            TestState.CreateAccount(TestItem.AddressC, 1.Ether());
             Keccak codehash = Keccak.Compute("some code");
-            TestState.UpdateCodeHash(TestObject.AddressC, codehash, Spec);
+            TestState.UpdateCodeHash(TestItem.AddressC, codehash, Spec);
 
             byte[] code = Prepare.EvmCode
-                .PushData(TestObject.AddressC)
+                .PushData(TestItem.AddressC)
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)
@@ -148,44 +150,44 @@ namespace Nethermind.Evm.Test
                 .PushData(Recipient)
                 .Op(Instruction.SELFDESTRUCT).Done;
 
-            TestState.CreateAccount(TestObject.AddressC, 1.Ether());
+            TestState.CreateAccount(TestItem.AddressC, 1.Ether());
             Keccak selfDestructCodeHash = TestState.UpdateCode(selfDestructCode);
-            TestState.UpdateCodeHash(TestObject.AddressC, selfDestructCodeHash, Spec);
+            TestState.UpdateCodeHash(TestItem.AddressC, selfDestructCodeHash, Spec);
 
             byte[] code = Prepare.EvmCode
-                .Call(TestObject.AddressC, 50000)
-                .PushData(TestObject.AddressC)
+                .Call(TestItem.AddressC, 50000)
+                .PushData(TestItem.AddressC)
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)
                 .Done;
 
             Execute(code);
-            AssertStorage(0, Keccak.Zero);
+            AssertStorage(0, selfDestructCodeHash);
         }
 
         [Test]
         public void Self_destructed_and_reverted_returns_code_hash()
         {
             byte[] callAndRevertCode = Prepare.EvmCode
-                .Call(TestObject.AddressD, 50000)
+                .Call(TestItem.AddressD, 50000)
                 .Op(Instruction.REVERT).Done;
 
             byte[] selfDestructCode = Prepare.EvmCode
                 .PushData(Recipient)
                 .Op(Instruction.SELFDESTRUCT).Done;
 
-            TestState.CreateAccount(TestObject.AddressD, 1.Ether());
+            TestState.CreateAccount(TestItem.AddressD, 1.Ether());
             Keccak selfDestructCodeHash = TestState.UpdateCode(selfDestructCode);
-            TestState.UpdateCodeHash(TestObject.AddressD, selfDestructCodeHash, Spec);
+            TestState.UpdateCodeHash(TestItem.AddressD, selfDestructCodeHash, Spec);
 
-            TestState.CreateAccount(TestObject.AddressC, 1.Ether());
+            TestState.CreateAccount(TestItem.AddressC, 1.Ether());
             Keccak revertCodeHash = TestState.UpdateCode(callAndRevertCode);
-            TestState.UpdateCodeHash(TestObject.AddressC, revertCodeHash, Spec);
+            TestState.UpdateCodeHash(TestItem.AddressC, revertCodeHash, Spec);
 
             byte[] code = Prepare.EvmCode
-                .Call(TestObject.AddressC, 50000)
-                .PushData(TestObject.AddressD)
+                .Call(TestItem.AddressC, 50000)
+                .PushData(TestItem.AddressD)
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)
@@ -198,11 +200,11 @@ namespace Nethermind.Evm.Test
         [Test]
         public void Empty_account_that_would_be_cleared_returns_zero()
         {
-            TestState.CreateAccount(TestObject.AddressC, 0.Ether());
+            TestState.CreateAccount(TestItem.AddressC, 0.Ether());
 
             byte[] code = Prepare.EvmCode
-                .Call(TestObject.AddressC, 0)
-                .PushData(TestObject.AddressC)
+                .Call(TestItem.AddressC, 0)
+                .PushData(TestItem.AddressC)
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)
@@ -210,10 +212,8 @@ namespace Nethermind.Evm.Test
 
             Execute(code);
 
-            // todo: so far EIP does not define whether it should be zero or empty data
-            AssertStorage(0, Keccak.OfAnEmptyString);
-            Assert.False(TestState.AccountExists(TestObject.AddressC),
-                "did not test the right thing - it was not an empty account + touch scenario");
+            AssertStorage(0, 0);
+            Assert.False(TestState.AccountExists(TestItem.AddressC), "did not test the right thing - it was not an empty account + touch scenario");
         }
 
         [Test]
@@ -253,13 +253,13 @@ namespace Nethermind.Evm.Test
                 .Create(initCode, 0)
                 .Op(Instruction.REVERT).Done;
 
-            TestState.CreateAccount(TestObject.AddressC, 1.Ether());
+            TestState.CreateAccount(TestItem.AddressC, 1.Ether());
             Keccak createCodeHash = TestState.UpdateCode(createCode);
-            TestState.UpdateCodeHash(TestObject.AddressC, createCodeHash, Spec);
+            TestState.UpdateCodeHash(TestItem.AddressC, createCodeHash, Spec);
             
             byte[] code = Prepare.EvmCode
-                .Call(TestObject.AddressC, 50000)
-                .PushData(Address.OfContract(TestObject.AddressC, 0))
+                .Call(TestItem.AddressC, 50000)
+                .PushData(Address.OfContract(TestItem.AddressC, 0))
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)
@@ -281,13 +281,13 @@ namespace Nethermind.Evm.Test
             byte[] createCode = Prepare.EvmCode
                 .Create(initCode, 0).Done;
 
-            TestState.CreateAccount(TestObject.AddressC, 1.Ether());
+            TestState.CreateAccount(TestItem.AddressC, 1.Ether());
             Keccak createCodeHash = TestState.UpdateCode(createCode);
-            TestState.UpdateCodeHash(TestObject.AddressC, createCodeHash, Spec);
+            TestState.UpdateCodeHash(TestItem.AddressC, createCodeHash, Spec);
 
             byte[] code = Prepare.EvmCode
-                .Call(TestObject.AddressC, 50000)
-                .PushData(Address.OfContract(TestObject.AddressC, 0))
+                .Call(TestItem.AddressC, 50000)
+                .PushData(Address.OfContract(TestItem.AddressC, 0))
                 .Op(Instruction.EXTCODEHASH)
                 .PushData(0)
                 .Op(Instruction.SSTORE)

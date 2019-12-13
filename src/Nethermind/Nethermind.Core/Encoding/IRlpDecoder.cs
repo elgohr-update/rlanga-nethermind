@@ -16,9 +16,27 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System.IO;
+
 namespace Nethermind.Core.Encoding
 {
     public interface IRlpDecoder
     {
+    }
+    
+    public interface IRlpDecoder<T> : IRlpDecoder
+    {
+        T Decode(RlpStream rlpStream, RlpBehaviors rlpBehaviors = RlpBehaviors.None);
+        Rlp Encode(T item, RlpBehaviors rlpBehaviors = RlpBehaviors.None);
+        void Encode(MemoryStream stream, T item, RlpBehaviors rlpBehaviors = RlpBehaviors.None);
+        int GetLength(T item, RlpBehaviors rlpBehaviors);
+    }
+    
+    public interface IRlpValueDecoder<T> : IRlpDecoder
+    {
+        T Decode(Rlp.ValueDecoderContext decoderContext, RlpBehaviors rlpBehaviors = RlpBehaviors.None);
+        Rlp Encode(T item, RlpBehaviors rlpBehaviors = RlpBehaviors.None);
+        void Encode(MemoryStream stream, T item, RlpBehaviors rlpBehaviors = RlpBehaviors.None);
+        int GetLength(T item, RlpBehaviors rlpBehaviors);
     }
 }

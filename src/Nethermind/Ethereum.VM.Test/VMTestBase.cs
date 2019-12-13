@@ -24,12 +24,13 @@ using System.Numerics;
 using Ethereum.Test.Base;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
+using Nethermind.Core.Specs.Forks;
 using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm;
+using Nethermind.Evm.Tracing;
+using Nethermind.Logging;
 using Nethermind.Store;
 using Newtonsoft.Json;
 using NUnit.Framework;
@@ -43,8 +44,8 @@ namespace Ethereum.VM.Test
         private IStorageProvider _storageProvider;
         private IBlockhashProvider _blockhashProvider;
         private IStateProvider _stateProvider;
+        private ISpecProvider _specProvider;
         private ILogManager _logManager = NullLogManager.Instance;
-        private readonly IReleaseSpec _releaseSpec = Olympic.Instance;
 
         [SetUp]
         public void Setup()
@@ -52,7 +53,8 @@ namespace Ethereum.VM.Test
             _stateDb = new StateDb();
             _codeDb = new StateDb();
             _blockhashProvider = new TestBlockhashProvider();
-            _stateProvider = new StateProvider(new StateTree(_stateDb), _codeDb, _logManager);
+            _specProvider = OlympicSpecProvider.Instance;;
+            _stateProvider = new StateProvider(_stateDb, _codeDb, _logManager);
             _storageProvider = new StorageProvider(_stateDb, _stateProvider, _logManager);
         }
 
@@ -118,7 +120,7 @@ namespace Ethereum.VM.Test
             environment.CurrentCoinbase = envJson.CurrentCoinbase == null ? null : new Address(envJson.CurrentCoinbase);
             environment.CurrentDifficulty = Bytes.FromHexString(envJson.CurrentDifficulty).ToUInt256();
             environment.CurrentGasLimit = Bytes.FromHexString(envJson.CurrentGasLimit).ToUnsignedBigInteger();
-            environment.CurrentNumber = Bytes.FromHexString(envJson.CurrentNumber).ToUInt256();
+            environment.CurrentNumber = (long)Bytes.FromHexString(envJson.CurrentNumber).ToUInt256();
             environment.CurrentTimestamp = Bytes.FromHexString(envJson.CurrentTimestamp).ToUInt256();
             return environment;
         }
@@ -139,7 +141,9 @@ namespace Ethereum.VM.Test
 
         protected void RunTest(VirtualMachineTest test)
         {
-            VirtualMachine machine = new VirtualMachine(_stateProvider, _storageProvider, _blockhashProvider, _logManager);
+            TestContext.WriteLine($"Running {test.GetType().FullName}");
+            
+            VirtualMachine machine = new VirtualMachine(_stateProvider, _storageProvider, _blockhashProvider, _specProvider, _logManager);
             ExecutionEnvironment environment = new ExecutionEnvironment();
             environment.Value = test.Execution.Value;
             environment.CallDepth = 0;
@@ -185,12 +189,12 @@ namespace Ethereum.VM.Test
                 }
             }
 
-            EvmState state = new EvmState((long)test.Execution.Gas, environment, ExecutionType.Transaction, false);
+            EvmState state = new EvmState((long)test.Execution.Gas, environment, ExecutionType.Transaction, false, true, false);
 
-            _storageProvider.Commit(Olympic.Instance);
+            _storageProvider.Commit();
             _stateProvider.Commit(Olympic.Instance);
 
-            TransactionSubstate substate = machine.Run(state, Olympic.Instance, false);
+            TransactionSubstate substate = machine.Run(state, NullTxTracer.Instance);
             if (test.Out == null)
             {
                 Assert.NotNull(substate.Error);
@@ -199,7 +203,7 @@ namespace Ethereum.VM.Test
 
             Assert.True(Bytes.AreEqual(test.Out, substate.Output),
                 $"Exp: {test.Out.ToHexString(true)} != Actual: {substate.Output.ToHexString(true)}");
-            Assert.AreEqual((long)test.Gas, state.GasAvailable);
+            Assert.AreEqual((long)test.Gas, state.GasAvailable, "gas available");
             foreach (KeyValuePair<Address, AccountState> accountState in test.Post)
             {
                 bool accountExists = _stateProvider.AccountExists(accountState.Key);
@@ -256,7 +260,7 @@ namespace Ethereum.VM.Test
             public Address CurrentCoinbase { get; set; }
             public UInt256 CurrentDifficulty { get; set; }
             public BigInteger CurrentGasLimit { get; set; }
-            public UInt256 CurrentNumber { get; set; }
+            public long CurrentNumber { get; set; }
             public UInt256 CurrentTimestamp { get; set; }
         }
 

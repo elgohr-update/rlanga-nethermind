@@ -18,10 +18,7 @@
 
 using System.Linq;
 using System.Numerics;
-using Nethermind.Core;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Test.Builders;
-using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm.Tracing;
 using Nethermind.Store;
 using NUnit.Framework;
@@ -34,14 +31,14 @@ namespace Nethermind.Evm.Test
         [Test]
         public void Stop()
         {
-            TransactionReceipt receipt = Execute((byte)Instruction.STOP);
-            Assert.AreEqual(GasCostOf.Transaction, receipt.GasUsed);
+            var receipt = Execute((byte)Instruction.STOP);
+            Assert.AreEqual(GasCostOf.Transaction, receipt.GasSpent);
         }
         
         [Test]
         public void Trace()
         {
-            (TransactionReceipt _, TransactionTrace trace) = ExecuteAndTrace(
+            var trace = ExecuteAndTrace(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.PUSH1,
@@ -52,7 +49,7 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.SSTORE);
             
             Assert.AreEqual(5, trace.Entries.Count, "number of entries");
-            TransactionTraceEntry entry = trace.Entries[1];
+            GethTxTraceEntry entry = trace.Entries[1];
             Assert.AreEqual(1, entry.Depth, nameof(entry.Depth));
             Assert.AreEqual(79000 - GasCostOf.VeryLow, entry.Gas, nameof(entry.Gas));
             Assert.AreEqual(GasCostOf.VeryLow, entry.GasCost, nameof(entry.GasCost));
@@ -66,7 +63,7 @@ namespace Nethermind.Evm.Test
         [Test]
         public void Trace_vm_errors()
         {
-            (TransactionReceipt _, TransactionTrace trace) = ExecuteAndTrace(UInt256.One, 21000L + 19000L, 
+            var trace = ExecuteAndTrace(1L, 21000L + 19000L, 
                 (byte)Instruction.PUSH1,
                 1,
                 (byte)Instruction.PUSH1,
@@ -87,7 +84,7 @@ namespace Nethermind.Evm.Test
                 .Op(Instruction.MLOAD)
                 .Done;
             
-            (TransactionReceipt _, TransactionTrace trace) = ExecuteAndTrace(UInt256.One, 21000L + 19000L, code);
+            var trace = ExecuteAndTrace(1L, 21000L + 19000L, code);
             
             Assert.True(trace.Entries.Any(e => e.Error != null));
         }
@@ -101,7 +98,7 @@ namespace Nethermind.Evm.Test
                 .Op(Instruction.JUMP)
                 .Done;
             
-            (TransactionReceipt _, TransactionTrace trace) = ExecuteAndTrace(UInt256.One, 21000L + 19000L, code);
+            var trace = ExecuteAndTrace(1L, 21000L + 19000L, code);
             
             Assert.True(trace.Entries.Any(e => e.Error != null));
         }
@@ -116,7 +113,7 @@ namespace Nethermind.Evm.Test
                 .Op(Instruction.JUMPI)
                 .Done;
             
-            (TransactionReceipt _, TransactionTrace trace) = ExecuteAndTrace(UInt256.One, 21000L + 19000L, code);
+            var trace = ExecuteAndTrace(1L, 21000L + 19000L, code);
             
             Assert.True(trace.Entries.Any(e => e.Error != null));
         }
@@ -124,7 +121,7 @@ namespace Nethermind.Evm.Test
         [Test(Description = "Test a case where the trace is created for one transaction and subsequent untraced transactions keep adding entries to the first trace created.")]
         public void Trace_each_tx_separate()
         {            
-            (TransactionReceipt _, TransactionTrace trace) = ExecuteAndTrace(
+            var trace = ExecuteAndTrace(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.PUSH1,
@@ -145,7 +142,7 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.SSTORE);
             
             Assert.AreEqual(5, trace.Entries.Count, "number of entries");
-            TransactionTraceEntry entry = trace.Entries[1];
+            GethTxTraceEntry entry = trace.Entries[1];
             Assert.AreEqual(1, entry.Depth, nameof(entry.Depth));
             Assert.AreEqual(79000 - GasCostOf.VeryLow, entry.Gas, nameof(entry.Gas));
             Assert.AreEqual(GasCostOf.VeryLow, entry.GasCost, nameof(entry.GasCost));
@@ -159,7 +156,7 @@ namespace Nethermind.Evm.Test
         [Test]
         public void Add_0_0()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.PUSH1,
@@ -168,14 +165,14 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SReset, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SReset, receipt.GasSpent, "gas");
             Assert.AreEqual(new byte[] {0}, Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
 
         [Test]
         public void Add_0_1()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.PUSH1,
@@ -184,14 +181,14 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SSet, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SSet, receipt.GasSpent, "gas");
             Assert.AreEqual(new byte[] {1}, Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
 
         [Test]
         public void Add_1_0()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 1,
                 (byte)Instruction.PUSH1,
@@ -200,26 +197,26 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SSet, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SSet, receipt.GasSpent, "gas");
             Assert.AreEqual(new byte[] {1}, Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
 
         [Test]
         public void Mstore()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 96, // data
                 (byte)Instruction.PUSH1,
                 64, // position
                 (byte)Instruction.MSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.Memory * 3, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.Memory * 3, receipt.GasSpent, "gas");
         }
 
         [Test]
         public void Mstore_twice_same_location()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 96,
                 (byte)Instruction.PUSH1,
@@ -230,23 +227,23 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 64,
                 (byte)Instruction.MSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 6 + GasCostOf.Memory * 3, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 6 + GasCostOf.Memory * 3, receipt.GasSpent, "gas");
         }
 
         [Test]
         public void Mload()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 64, // position
                 (byte)Instruction.MLOAD);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 2 + GasCostOf.Memory * 3, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 2 + GasCostOf.Memory * 3, receipt.GasSpent, "gas");
         }
 
         [Test]
         public void Mload_after_mstore()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 96,
                 (byte)Instruction.PUSH1,
@@ -255,23 +252,23 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 64,
                 (byte)Instruction.MLOAD);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 5 + GasCostOf.Memory * 3, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 5 + GasCostOf.Memory * 3, receipt.GasSpent, "gas");
         }
 
         [Test]
         public void Dup1()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.DUP1);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 2, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 2, receipt.GasSpent, "gas");
         }
 
         [Test]
         public void Codecopy()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 32, // length
                 (byte)Instruction.PUSH1,
@@ -279,35 +276,35 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 32, // dest
                 (byte)Instruction.CODECOPY);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 4 + GasCostOf.Memory * 3, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 4 + GasCostOf.Memory * 3, receipt.GasSpent, "gas");
         }
 
         [Test]
         public void Swap()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 32, // length
                 (byte)Instruction.PUSH1,
                 0, // src
                 (byte)Instruction.SWAP1);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3, receipt.GasSpent, "gas");
         }
 
         [Test]
         public void Sload()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0, // index
                 (byte)Instruction.SLOAD);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 1 + GasCostOf.SLoadEip150, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 1 + GasCostOf.SLoadEip150, receipt.GasSpent, "gas");
         }
 
         [Test]
         public void Exp_2_160()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 160,
                 (byte)Instruction.PUSH1,
@@ -316,14 +313,14 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.SSet + GasCostOf.Exp + GasCostOf.ExpByteEip160, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.SSet + GasCostOf.Exp + GasCostOf.ExpByteEip160, receipt.GasSpent, "gas");
             Assert.AreEqual(BigInteger.Pow(2, 160).ToBigEndianByteArray(), Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
 
         [Test]
         public void Exp_0_0()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.PUSH1,
@@ -332,14 +329,14 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.Exp + GasCostOf.SSet, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.Exp + GasCostOf.SSet, receipt.GasSpent, "gas");
             Assert.AreEqual(BigInteger.One.ToBigEndianByteArray(), Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
         
         [Test]
         public void Exp_0_160()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 160,
                 (byte)Instruction.PUSH1,
@@ -348,14 +345,14 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.Exp + GasCostOf.ExpByteEip160 + GasCostOf.SReset, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.Exp + GasCostOf.ExpByteEip160 + GasCostOf.SReset, receipt.GasSpent, "gas");
             Assert.AreEqual(BigInteger.Zero.ToBigEndianByteArray(), Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
         
         [Test]
         public void Exp_1_160()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 160,
                 (byte)Instruction.PUSH1,
@@ -364,14 +361,14 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.Exp + GasCostOf.ExpByteEip160 + GasCostOf.SSet, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.Exp + GasCostOf.ExpByteEip160 + GasCostOf.SSet, receipt.GasSpent, "gas");
             Assert.AreEqual(BigInteger.One.ToBigEndianByteArray(), Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
         
         [Test]
         public void Sub_0_0()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.PUSH1,
@@ -380,28 +377,28 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 4 + GasCostOf.SReset, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 4 + GasCostOf.SReset, receipt.GasSpent, "gas");
             Assert.AreEqual(new byte[] {0}, Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
         
         [Test]
         public void Not_0()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.NOT,
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.SSet, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 3 + GasCostOf.SSet, receipt.GasSpent, "gas");
             Assert.AreEqual((BigInteger.Pow(2, 256) - 1).ToBigEndianByteArray(), Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
         
         [Test]
         public void Or_0_0()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.PUSH1,
@@ -410,20 +407,20 @@ namespace Nethermind.Evm.Test
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 4 + GasCostOf.SReset, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 4 + GasCostOf.SReset, receipt.GasSpent, "gas");
             Assert.AreEqual(BigInteger.Zero.ToBigEndianByteArray(), Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
         
         [Test]
         public void Sstore_twice_0_same_storage_should_refund_only_once()
         {
-            TransactionReceipt receipt = Execute(
+            var receipt = Execute(
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.PUSH1,
                 0,
                 (byte)Instruction.SSTORE);
-            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 2 + GasCostOf.SReset, receipt.GasUsed, "gas");
+            Assert.AreEqual(GasCostOf.Transaction + GasCostOf.VeryLow * 2 + GasCostOf.SReset, receipt.GasSpent, "gas");
             Assert.AreEqual(BigInteger.Zero.ToBigEndianByteArray(), Storage.Get(new StorageAddress(Recipient, 0)), "storage");
         }
 

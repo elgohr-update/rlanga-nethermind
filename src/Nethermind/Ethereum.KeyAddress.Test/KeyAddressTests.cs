@@ -20,26 +20,27 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Numerics;
 using Ethereum.Test.Base;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
+using Nethermind.Dirichlet.Numerics;
+using Nethermind.Logging;
 using Newtonsoft.Json;
 using NUnit.Framework;
 
 namespace Ethereum.KeyAddress.Test
 {
+    [Parallelizable(ParallelScope.All)]
     public class KeyAddressTests
     {
-        private IEthereumSigner _signer;
+        private IEthereumEcdsa _ecdsa;
         
         [OneTimeSetUp]
         public void SetUp()
         {
             Directory.SetCurrentDirectory(AppDomain.CurrentDomain.BaseDirectory);
-            _signer = new EthereumSigner(OlympicSpecProvider.Instance, NullLogManager.Instance);
+            _ecdsa = new EthereumEcdsa(OlympicSpecProvider.Instance, NullLogManager.Instance);
         }
 
         private static IEnumerable<KeyAddressTest> LoadTests()
@@ -55,8 +56,8 @@ namespace Ethereum.KeyAddress.Test
                 testJson.Seed,
                 testJson.Key,
                 testJson.Addr,
-                BigInteger.Parse(testJson.Signature.R),
-                BigInteger.Parse(testJson.Signature.S),
+                UInt256.Parse(testJson.Signature.R),
+                UInt256.Parse(testJson.Signature.S),
                 byte.Parse(testJson.Signature.V));
         }
 
@@ -66,7 +67,7 @@ namespace Ethereum.KeyAddress.Test
         {
             Keccak messageHash = Keccak.Compute(message);
             Signature sig = new Signature(sigHex);
-            Address recovered = _signer.RecoverAddress(sig, messageHash);
+            Address recovered = _ecdsa.RecoverAddress(sig, messageHash);
             Address address = new Address(addressHex);
 
             // TODO: check - at the moment they are failing when running in the test mode but not in Debug
@@ -82,7 +83,7 @@ namespace Ethereum.KeyAddress.Test
             
             PrivateKey privateKey = new PrivateKey(test.Key);
             Address actualAddress = privateKey.Address;
-            Signature actualSig = _signer.Sign(privateKey, Keccak.OfAnEmptyString);
+            Signature actualSig = _ecdsa.Sign(privateKey, Keccak.OfAnEmptyString);
             string actualSigHex = actualSig.ToString();
 
             Signature expectedSig = new Signature(test.R, test.S, test.V);
@@ -91,13 +92,13 @@ namespace Ethereum.KeyAddress.Test
 
             Assert.AreEqual(expectedAddress, actualAddress, "address vs adress from private key");
 
-            Address recoveredActualAddress = _signer.RecoverAddress(actualSig, Keccak.OfAnEmptyString);
+            Address recoveredActualAddress = _ecdsa.RecoverAddress(actualSig, Keccak.OfAnEmptyString);
             Assert.AreEqual(actualAddress, recoveredActualAddress);
 
             // it does not work
             Assert.AreEqual(expectedSigHex, actualSigHex, "expected vs actual signature hex");
 
-            Address recovered = _signer.RecoverAddress(expectedSig, Keccak.OfAnEmptyString);
+            Address recovered = _ecdsa.RecoverAddress(expectedSig, Keccak.OfAnEmptyString);
             Assert.AreEqual(expectedAddress, recovered);
         }
 
@@ -120,7 +121,7 @@ namespace Ethereum.KeyAddress.Test
 
         public class KeyAddressTest
         {
-            public KeyAddressTest(string seed, string key, string address, BigInteger r, BigInteger s, byte v)
+            public KeyAddressTest(string seed, string key, string address, UInt256 r, UInt256 s, byte v)
             {
                 Seed = seed;
                 Key = key;
@@ -135,8 +136,8 @@ namespace Ethereum.KeyAddress.Test
             public string Address { get; }
             public byte V { get; }
 
-            public BigInteger R { get; }
-            public BigInteger S { get; }
+            public UInt256 R { get; }
+            public UInt256 S { get; }
 
             public override string ToString()
             {

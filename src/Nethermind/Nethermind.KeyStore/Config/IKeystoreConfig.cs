@@ -20,9 +20,9 @@ using Nethermind.Config;
 
 namespace Nethermind.KeyStore.Config
 {
-    public interface IKeystoreConfig : IConfig
+    public interface IKeyStoreConfig : IConfig
     {
-        string KeyStoreDirectory { get; }
+        string KeyStoreDirectory { get; set; }
         string KeyStoreEncoding { get; }
 
         string Kdf { get; }
@@ -36,5 +36,6 @@ namespace Nethermind.KeyStore.Config
         int SymmetricEncrypterBlockSize { get; }
         int SymmetricEncrypterKeySize { get; }
         int IVSize { get; }
+        string TestNodeKey { get; set; }
     }
 }

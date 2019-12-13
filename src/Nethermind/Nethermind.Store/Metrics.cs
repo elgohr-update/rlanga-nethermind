@@ -34,18 +34,22 @@ namespace Nethermind.Store
         public static long StateDbWrites { get; set; }
         public static long StorageTreeReads { get; set; }
         public static long StorageTreeWrites { get; set; }
-        public static long StorageDbReads { get; set; }
-        public static long StorageDbWrites { get; set; }
         public static long PendingTxsDbReads { get; set; }
         public static long PendingTxsDbWrites { get; set; }
+        public static long ConsumersDbReads { get; set; }
+        public static long ConsumersDbWrites { get; set; }
+        public static long ConfigsDbReads { get; set; }
+        public static long ConfigsDbWrites { get; set; }
+        public static long EthRequestsDbReads { get; set; }
+        public static long EthRequestsDbWrites { get; set; }
+        public static long TraceDbReads { get; set; }
+        public static long TraceDbWrites { get; set; }
         public static long OtherDbReads { get; set; }
         public static long OtherDbWrites { get; set; }
         public static long TreeNodeHashCalculations { get; set; }
         public static long TreeNodeRlpEncodings { get; set; }
         public static long TreeNodeRlpDecodings { get; set; }
-
-        public static long EvmExceptions { get; set; }
-        public static long SelfDestructs { get; set; }
-        public static long EmptyAccountSaves { get; set; }
+        public static long HeaderDbReads { get; set; }
+        public static long HeaderDbWrites { get; set; }
     }
 } 

@@ -18,9 +18,8 @@
 
 using System;
 using FluentAssertions;
-using Nethermind.Blockchain.TransactionPools;
+using Nethermind.Blockchain.TxPools;
 using Nethermind.Core;
-using Nethermind.Core.Test.Builders;
 using Nethermind.Dirichlet.Numerics;
 using NUnit.Framework;
 
@@ -37,8 +36,7 @@ namespace Nethermind.Blockchain.Test
         {
             var utcNow = DateTime.UtcNow;
             var validator = GetValidator();
-            var dateTimeProvider = Build.A.DateTimeProvider.WithUtcNow(utcNow).TestObject;
-            var timestamp = new Timestamp(dateTimeProvider);
+            var timestamp = new Timestamper(utcNow);
             var transaction1 = GetTransaction(utcNow, 5);
             var transaction2 = GetTransaction(utcNow, 15);
             var transaction3 = GetTransaction(utcNow, 25);
@@ -53,8 +51,7 @@ namespace Nethermind.Blockchain.Test
         {
             var utcNow = DateTime.UtcNow;
             var validator = GetValidator();
-            var dateTimeProvider = Build.A.DateTimeProvider.WithUtcNow(utcNow).TestObject;
-            var timestamp = new Timestamp(dateTimeProvider);
+            var timestamp = new Timestamper(utcNow);
             var transaction1 = GetTransaction(utcNow, 5);
             var transaction2 = GetTransaction(utcNow, 600);
             var transaction3 = GetTransaction(utcNow, 1000);
@@ -64,14 +61,19 @@ namespace Nethermind.Blockchain.Test
             validator.IsRemovable(currentTimestamp, transaction3.Timestamp).Should().BeTrue();
         }
 
-        private PendingTransactionThresholdValidator GetValidator(int obsoletePendingTransactionInterval = 15,
+        private PendingTxThresholdValidator GetValidator(int obsoletePendingTransactionInterval = 15,
             int removePendingTransactionInterval = 600)
         {
             _obsoletePendingTransactionInterval = obsoletePendingTransactionInterval;
             _removePendingTransactionInterval = removePendingTransactionInterval;
 
-            return new PendingTransactionThresholdValidator(_obsoletePendingTransactionInterval,
-                _removePendingTransactionInterval);
+            TxPoolConfig config = new TxPoolConfig
+            {
+                ObsoletePendingTransactionInterval = _obsoletePendingTransactionInterval,
+                RemovePendingTransactionInterval = _removePendingTransactionInterval
+            };
+            
+            return new PendingTxThresholdValidator(config);
         }
 
         private Transaction GetTransaction(DateTime utcNow, int createdSecondsAgo = 0)

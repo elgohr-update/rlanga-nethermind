@@ -17,7 +17,9 @@
  */
 
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text.RegularExpressions;
 
 namespace Nethermind.Core
 {
@@ -32,10 +34,12 @@ namespace Nethermind.Core
                 osDescription = osDescription.Substring(0, Math.Max(0, indexOfHash - 1));
             }
 
-            Description = $"Nethermind/v0.9.1-RC0/{RuntimeInformation.OSArchitecture}-{osDescription}/{RuntimeInformation.FrameworkDescription.Trim().Replace(".NET ", "").Replace(" ", "")}";
+            string gitHash = File.Exists("git-hash") ? File.ReadAllText("git-hash") : string.Empty;
+            gitHash = Regex.Match(gitHash, "\\-g(\\w+)").Groups[1].Value;
+            
+            Description = $"Nethermind/v1.1.0-{gitHash}/{RuntimeInformation.OSArchitecture}-{osDescription}/{RuntimeInformation.FrameworkDescription.Trim().Replace(".NET ", "").Replace(" ", "")}";
         }
         
-//        public static readonly string Description = $"Nethermind/v0.9.0-eth63test/{RuntimeInformation.OSArchitecture}-{RuntimeInformation.OSDescription.Trim().Replace(" ", "_")}/{RuntimeInformation.FrameworkDescription.Trim().Replace(".NET ", "").Replace(" ", "")}";
         public static string Description { get; }
     }
 }

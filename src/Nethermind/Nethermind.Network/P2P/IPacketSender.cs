@@ -16,12 +16,10 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Network.Rlpx;
-
 namespace Nethermind.Network.P2P
 {
     public interface IPacketSender
     {
-        void Enqueue(Packet message, bool priority = false);
+        void Enqueue<T>(T message) where T : P2PMessage;
     }
 }

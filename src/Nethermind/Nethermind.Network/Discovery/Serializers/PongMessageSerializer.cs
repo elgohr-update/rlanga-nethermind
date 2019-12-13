@@ -21,26 +21,24 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
 using Nethermind.Network.Discovery.Messages;
-using Nethermind.Stats;
 
 namespace Nethermind.Network.Discovery.Serializers
 {
     public class PongMessageSerializer : DiscoveryMessageSerializerBase, IMessageSerializer<PongMessage>
     {
-        public PongMessageSerializer(ISigner signer, IPrivateKeyGenerator privateKeyGenerator, IDiscoveryMessageFactory messageFactory, INodeIdResolver nodeIdResolver, INodeFactory nodeFactory) : base(signer, privateKeyGenerator, messageFactory, nodeIdResolver, nodeFactory)
+        public PongMessageSerializer(IEcdsa ecdsa, IPrivateKeyGenerator privateKeyGenerator, IDiscoveryMessageFactory messageFactory, INodeIdResolver nodeIdResolver) : base(ecdsa, privateKeyGenerator, messageFactory, nodeIdResolver)
         {
         }
 
         public byte[] Serialize(PongMessage message)
         {
-            byte[] typeBytes = { (byte)message.MessageType };
             byte[] data = Rlp.Encode(
                 Encode(message.FarAddress),
                 Rlp.Encode(message.PingMdc),
                 Rlp.Encode(message.ExpirationTime)
             ).Bytes;
 
-            byte[] serializedMsg = Serialize(typeBytes, data);
+            byte[] serializedMsg = Serialize((byte) message.MessageType, data);
             return serializedMsg;
         }
 
@@ -48,7 +46,7 @@ namespace Nethermind.Network.Discovery.Serializers
         {
             var results = PrepareForDeserialization<PongMessage>(msg);
 
-            var rlp = results.Data.AsRlpContext();
+            var rlp = results.Data.AsRlpStream();
 
             rlp.ReadSequenceLength();
             rlp.ReadSequenceLength();

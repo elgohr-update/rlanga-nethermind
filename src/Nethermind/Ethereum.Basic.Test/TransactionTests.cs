@@ -27,13 +27,14 @@ using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Dirichlet.Numerics;
+using Nethermind.Logging;
 using NUnit.Framework;
 
 namespace Ethereum.Basic.Test
 {
+    [Parallelizable(ParallelScope.All)]
     public class TransactionTests
     {
         [OneTimeSetUp]
@@ -52,7 +53,7 @@ namespace Ethereum.Basic.Test
         [TestCaseSource(nameof(LoadTests))]
         public void Test(TransactionTest test)
         {
-            EthereumSigner ethereumSigner = new EthereumSigner(OlympicSpecProvider.Instance, NullLogManager.Instance);
+            EthereumEcdsa ethereumEcdsa = new EthereumEcdsa(OlympicSpecProvider.Instance, NullLogManager.Instance);
             Transaction decodedUnsigned = Rlp.Decode<Transaction>(test.Unsigned);
             Assert.AreEqual(test.Value, decodedUnsigned.Value, "value");
             Assert.AreEqual(test.GasPrice, decodedUnsigned.GasPrice, "gasPrice");
@@ -62,11 +63,11 @@ namespace Ethereum.Basic.Test
             Assert.AreEqual(test.Nonce, decodedUnsigned.Nonce, "nonce");
 
             Transaction decodedSigned = Rlp.Decode<Transaction>(test.Signed);
-            ethereumSigner.Sign(test.PrivateKey, decodedUnsigned, 0);
+            ethereumEcdsa.Sign(test.PrivateKey, decodedUnsigned, 0);
             Assert.AreEqual(decodedSigned.Signature.R, decodedUnsigned.Signature.R, "R");
             BigInteger expectedS = decodedSigned.Signature.S.ToUnsignedBigInteger();
             BigInteger actualS = decodedUnsigned.Signature.S.ToUnsignedBigInteger();
-            BigInteger otherS = EthereumSigner.LowSTransform - actualS;
+            BigInteger otherS = EthereumEcdsa.LowSTransform - actualS;
 
             // test does not use normalized signature
             if (otherS != expectedS && actualS != expectedS)
@@ -103,7 +104,7 @@ namespace Ethereum.Basic.Test
             }
 
             test.Unsigned = new Rlp(unsigned.Slice(0, unsigned.Length - 3));
-            test.StartGas = (UInt256)testJson.StartGas;
+            test.StartGas = testJson.StartGas;
             test.To = string.IsNullOrEmpty(testJson.To) ? null : new Address(testJson.To);
             return test;
         }
@@ -127,7 +128,7 @@ namespace Ethereum.Basic.Test
             public PrivateKey PrivateKey { get; set; }
             public UInt256 Nonce { get; set; }
             public UInt256 GasPrice { get; set; }
-            public UInt256 StartGas { get; set; }
+            public long StartGas { get; set; }
             public Address To { get; set; }
             public UInt256 Value { get; set; }
             public byte[] Data { get; set; }

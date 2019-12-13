@@ -16,7 +16,7 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Core.Specs.Forks;
 
 namespace Nethermind.Core.Specs
 {
@@ -36,15 +36,13 @@ namespace Nethermind.Core.Specs
             }
         }
 
-        public IReleaseSpec CurrentSpec => _releaseSpec;
-
         public IReleaseSpec GenesisSpec => _releaseSpec;
 
-        public IReleaseSpec GetSpec(UInt256 blockNumber)
+        public IReleaseSpec GetSpec(long blockNumber)
         {
             return _releaseSpec;
         }
         
-        public UInt256? DaoBlockNumber { get; }
+        public long? DaoBlockNumber { get; }
     }
 }

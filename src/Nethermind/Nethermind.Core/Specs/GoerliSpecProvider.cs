@@ -16,7 +16,7 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Core.Specs.Forks;
 
 namespace Nethermind.Core.Specs
 {
@@ -28,17 +28,21 @@ namespace Nethermind.Core.Specs
         {
         }
 
-        public IReleaseSpec CurrentSpec => Constantinople.Instance;
+        public IReleaseSpec GenesisSpec => ConstantinopleFix.Instance;
 
-        public IReleaseSpec GenesisSpec => Constantinople.Instance;
-
-        public IReleaseSpec GetSpec(UInt256 blockNumber)
+        public IReleaseSpec GetSpec(long blockNumber)
         {
-            return Constantinople.Instance;
+            if (blockNumber < IstanbulBlockNumber)
+            {
+                return ConstantinopleFix.Instance;
+            }
+
+            return Istanbul.Instance;
         }
 
-        public UInt256? DaoBlockNumber { get; } = null;
+        public long? DaoBlockNumber { get; } = null;
+        public static long IstanbulBlockNumber { get; } = 0x17D433;
 
-        public int ChainId => 0x188c;
+        public int ChainId => 0x5;
     }
 }

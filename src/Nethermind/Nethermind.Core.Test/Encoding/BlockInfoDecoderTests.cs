@@ -31,17 +31,30 @@ namespace Nethermind.Core.Test.Encoding
         public void Can_do_roundtrip()
         {
             BlockInfo blockInfo = new BlockInfo();
-            blockInfo.BlockHash = TestObject.KeccakA;
+            blockInfo.BlockHash = TestItem.KeccakA;
             blockInfo.TotalDifficulty = 1;
-            blockInfo.TotalTransactions = 1;
             blockInfo.WasProcessed = true;
 
             Rlp rlp = Rlp.Encode(blockInfo);
             BlockInfo decoded = Rlp.Decode<BlockInfo>(rlp);
             Assert.True(decoded.WasProcessed, "0 processed");
-            Assert.AreEqual(TestObject.KeccakA, decoded.BlockHash, "block hash");
+            Assert.AreEqual(TestItem.KeccakA, decoded.BlockHash, "block hash");
             Assert.AreEqual(UInt256.One, decoded.TotalDifficulty, "difficulty");
-            Assert.AreEqual(UInt256.One, decoded.TotalTransactions, "txs");
+        }
+        
+        [Test]
+        public void Can_do_roundtrip_with_finalization()
+        {
+            Rlp.Decoders[typeof(BlockInfo)] = new BlockInfoDecoder(true);
+            Can_do_roundtrip();
+        }
+        
+        [Test]
+        public void Can_handle_nulls()
+        {
+            Rlp rlp = Rlp.Encode((BlockInfo)null);
+            BlockInfo decoded = Rlp.Decode<BlockInfo>(rlp);
+            Assert.Null(decoded);
         }
     }
 }

@@ -16,6 +16,8 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
+using Nethermind.Dirichlet.Numerics;
 using NUnit.Framework;
 
 namespace Nethermind.Evm.Test
@@ -36,7 +38,28 @@ namespace Nethermind.Evm.Test
         public void Div32Ceiling(int input, int expectedResult)
         {
             long result = EvmPooledMemory.Div32Ceiling((ulong)input);
+            TestContext.WriteLine($"Memory cost (gas): {result}");
             Assert.AreEqual(expectedResult, result);
+        }
+
+        private const int MaxCodeSize = 24576;
+        
+        [TestCase(0, 0)]
+        [TestCase(0, 32)]
+        [TestCase(0, 256)]
+        [TestCase(0, 2048)]
+        [TestCase(0, MaxCodeSize)]
+        [TestCase(10 * MaxCodeSize, MaxCodeSize)]
+        [TestCase(100 * MaxCodeSize, MaxCodeSize)]
+        [TestCase(1000 * MaxCodeSize, MaxCodeSize)]
+        [TestCase(0, 1024 * 1024)]
+        [TestCase(0, Int32.MaxValue)]
+        public void MemoryCost(int destination, int memoryAllocation)
+        {
+            EvmPooledMemory memory = new EvmPooledMemory();
+            UInt256 dest = (UInt256) destination;
+            var result = memory.CalculateMemoryCost(ref dest, (UInt256)memoryAllocation);
+            TestContext.WriteLine($"Gas cost of allocating {memoryAllocation} starting from {dest}: {result}");
         }
     }
 }

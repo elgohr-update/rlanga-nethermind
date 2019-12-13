@@ -22,8 +22,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Dirichlet.Numerics;
+using Nethermind.Logging;
 using Nethermind.Mining.Difficulty;
 using NSubstitute;
 using NUnit.Framework;
@@ -36,23 +36,21 @@ namespace Nethermind.Mining.Test
         [Test]
         public async Task Can_mine()
         {
-            ulong validNonce = 971086423715459953;
+            ulong validNonce = 971086423715460064;
 
-            BlockHeader header = new BlockHeader(Keccak.Zero, Keccak.OfAnEmptySequenceRlp, Address.Zero, 1000, 1, 21000, 1, new byte[] {1, 2, 3});
-            header.TransactionsRoot = Keccak.Zero;
+            BlockHeader header = new BlockHeader(Keccak.Zero, Keccak.OfAnEmptySequenceRlp, Address.Zero, 27, 1, 21000, 1, new byte[] {1, 2, 3});
+            header.TxRoot = Keccak.Zero;
             header.ReceiptsRoot = Keccak.Zero;
             header.OmmersHash = Keccak.Zero;
             header.StateRoot = Keccak.Zero;
             header.Bloom = Bloom.Empty;
 
             Block block = new Block(header);
-            EthashSealEngine ethashSealEngine = new EthashSealEngine(new Ethash(NullLogManager.Instance), Substitute.For<IDifficultyCalculator>(), NullLogManager.Instance);
-            await ethashSealEngine.MineAsync(new CancellationTokenSource(TimeSpan.FromSeconds(20)).Token, block, validNonce - 10);
+            EthashSealer ethashSealer = new EthashSealer(new Ethash(LimboLogs.Instance), LimboLogs.Instance);
+            await ethashSealer.MineAsync(new CancellationTokenSource(TimeSpan.FromSeconds(600)).Token, block, validNonce - 3);
 
             Assert.AreEqual(validNonce, block.Header.Nonce);
-            Assert.AreEqual(new Keccak("0xff2c80283f139148a9b3f2a9dd19d698475937a85296225a96857599cce6d1e2"), block.Header.MixHash);
-
-            Console.WriteLine(block.Header.Nonce);
+            Assert.AreEqual(new Keccak("0x52b96cf62447129c6bd81f835721ee145b948ae3b05ef6eae454cbf69a5bc05d"), block.Header.MixHash);
         }
 
         [Test]
@@ -61,15 +59,15 @@ namespace Nethermind.Mining.Test
             ulong badNonce = 971086423715459953; // change if valid
 
             BlockHeader header = new BlockHeader(Keccak.Zero, Keccak.OfAnEmptySequenceRlp, Address.Zero, (UInt256)BigInteger.Pow(2, 32), 1, 21000, 1, new byte[] {1, 2, 3});
-            header.TransactionsRoot = Keccak.Zero;
+            header.TxRoot = Keccak.Zero;
             header.ReceiptsRoot = Keccak.Zero;
             header.OmmersHash = Keccak.Zero;
             header.StateRoot = Keccak.Zero;
             header.Bloom = Bloom.Empty;
 
             Block block = new Block(header);
-            EthashSealEngine ethashSealEngine = new EthashSealEngine(new Ethash(NullLogManager.Instance), Substitute.For<IDifficultyCalculator>(), NullLogManager.Instance);
-            await ethashSealEngine.MineAsync(new CancellationTokenSource(TimeSpan.FromMilliseconds(2000)).Token, block, badNonce).ContinueWith(t =>
+            EthashSealer ethashSealer = new EthashSealer(new Ethash(LimboLogs.Instance), LimboLogs.Instance);
+            await ethashSealer.MineAsync(new CancellationTokenSource(TimeSpan.FromMilliseconds(2000)).Token, block, badNonce).ContinueWith(t =>
             {
                 Assert.True(t.IsCanceled);
             });
@@ -88,9 +86,9 @@ namespace Nethermind.Mining.Test
             blockHeader.Hash = BlockHeader.CalculateHash(blockHeader);
             Block block = new Block(blockHeader);
 
-            IEthash ethash = new Ethash(NullLogManager.Instance);
-            EthashSealEngine ethashSealEngine = new EthashSealEngine(ethash, Substitute.For<IDifficultyCalculator>(), NullLogManager.Instance);
-            await ethashSealEngine.MineAsync(CancellationToken.None, block, 7217048144105167954);
+            IEthash ethash = new Ethash(LimboLogs.Instance);
+            EthashSealer ethashSealer = new EthashSealer(ethash, LimboLogs.Instance);
+            await ethashSealer.MineAsync(CancellationToken.None, block, 7217048144105167954);
 
             Assert.True(ethash.Validate(block.Header));
 

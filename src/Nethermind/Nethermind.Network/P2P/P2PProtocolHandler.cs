@@ -19,54 +19,73 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Core;
-using Nethermind.Core.Logging;
-using Nethermind.Core.Model;
+using Nethermind.Core.Crypto;
+using Nethermind.Logging;
 using Nethermind.Network.Rlpx;
 using Nethermind.Stats;
 using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.P2P
 {
-    public class P2PProtocolHandler : ProtocolHandlerBase, IProtocolHandler, IP2PMessageSender
+    public class P2PProtocolHandler : ProtocolHandlerBase, IProtocolHandler, IPingSender
     {
+        private readonly INodeStatsManager _nodeStatsManager;
         private readonly IPerfService _perfService;
         private bool _sentHello;
         private bool _isInitialized;
         private TaskCompletionSource<Packet> _pongCompletionSource;
 
         public P2PProtocolHandler(
-            IP2PSession p2PSession,
+            ISession session,
+            PublicKey localNodeId,
+            INodeStatsManager nodeStatsManager,
             IMessageSerializationService serializer,
-            NodeId localNodeId,
-            int listenPort,
-            ILogManager logManager, IPerfService perfService)
-            : base(p2PSession, serializer, logManager)
+            IPerfService perfService,
+            ILogManager logManager)
+            : base(session, nodeStatsManager, serializer, logManager)
         {
+            _nodeStatsManager = nodeStatsManager ?? throw new ArgumentNullException(nameof(nodeStatsManager));
             _perfService = perfService ?? throw new ArgumentNullException(nameof(perfService));
             LocalNodeId = localNodeId;
-            ListenPort = listenPort;
+            ListenPort = session.LocalPort;
             AgreedCapabilities = new List<Capability>();
+            AvailableCapabilities = new List<Capability>();
         }
 
         public List<Capability> AgreedCapabilities { get; }
+        public List<Capability> AvailableCapabilities { get; private set; }
 
         public int ListenPort { get; }
 
-        public NodeId LocalNodeId { get; }
+        public PublicKey LocalNodeId { get; }
 
         public string RemoteClientId { get; private set; }
+
+        public bool HasAvailableCapability(Capability capability) => AvailableCapabilities.Contains(capability);
+        public bool HasAgreedCapability(Capability capability) => AgreedCapabilities.Contains(capability);
+
+        public void AddSupportedCapability(Capability capability)
+        {
+            if (SupportedCapabilities.Contains(capability))
+            {
+                return;
+            }
+
+            SupportedCapabilities.Add(capability);
+        }
 
         public event EventHandler<ProtocolInitializedEventArgs> ProtocolInitialized;
 
         public event EventHandler<ProtocolEventArgs> SubprotocolRequested;
-
+        
         public void Init()
         {
             SendHello();
 
-            //We are expecting receiving Hello message anytime from the handshake completion, irrespectful from sedning Hello from our side
+            //We are expecting to receive Hello message anytime from the handshake completion, irrespective of sending Hello from our side
             CheckProtocolInitTimeout().ContinueWith(x =>
             {
                 if (x.IsFaulted && Logger.IsError)
@@ -74,10 +93,6 @@ namespace Nethermind.Network.P2P
                     Logger.Error("Error during p2pProtocol handler timeout logic", x.Exception);
                 }
             }); 
-        }
-
-        public void Close()
-        {
         }
 
         public byte ProtocolVersion { get; private set; } = 5;
@@ -91,49 +106,64 @@ namespace Nethermind.Network.P2P
             if (msg.PacketType == P2PMessageCode.Hello)
             {
                 HandleHello(Deserialize<HelloMessage>(msg.Data));
+                Metrics.HellosReceived++;
 
                 foreach (Capability capability in AgreedCapabilities.GroupBy(c => c.ProtocolCode).Select(c => c.OrderBy(v => v.Version).Last()))
                 {
-                    if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} Starting protocolHandler for {capability.ProtocolCode} v{capability.Version} on {P2PSession.RemotePort}");
+                    if(Logger.IsTrace) Logger.Trace($"{Session.RemoteNodeId} Starting protocolHandler for {capability.ProtocolCode} v{capability.Version} on {Session.RemotePort}");
                     SubprotocolRequested?.Invoke(this, new ProtocolEventArgs(capability.ProtocolCode, capability.Version));
                 }
             }
             else if (msg.PacketType == P2PMessageCode.Disconnect)
             {
                 DisconnectMessage disconnectMessage = Deserialize<DisconnectMessage>(msg.Data);
-                if(Logger.IsTrace) Logger.Trace($"|NetworkTrace| {P2PSession.RemoteNodeId} Received disconnect ({(Enum.IsDefined(typeof(DisconnectReason), (byte)disconnectMessage.Reason) ? ((DisconnectReason)disconnectMessage.Reason).ToString() : disconnectMessage.Reason.ToString())}) on {P2PSession.RemotePort}");
+                if(Logger.IsTrace) Logger.Trace($"|NetworkTrace| {Session.RemoteNodeId} Received disconnect ({(Enum.IsDefined(typeof(DisconnectReason), (byte)disconnectMessage.Reason) ? ((DisconnectReason)disconnectMessage.Reason).ToString() : disconnectMessage.Reason.ToString())}) on {Session.RemotePort}");
                 Close(disconnectMessage.Reason);
             }
             else if (msg.PacketType == P2PMessageCode.Ping)
             {
-                if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} Received PING on {P2PSession.RemotePort}");
+                if(Logger.IsTrace) Logger.Trace($"{Session.RemoteNodeId} Received PING on {Session.RemotePort}");
                 HandlePing();
             }
             else if (msg.PacketType == P2PMessageCode.Pong)
             {
-                if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} Received PONG on {P2PSession.RemotePort}");
+                if(Logger.IsTrace) Logger.Trace($"{Session.RemoteNodeId} Received PONG on {Session.RemotePort}");
                 HandlePong(msg);
+            }
+            else if (msg.PacketType == P2PMessageCode.AddCapability)
+            {
+                var message = Deserialize<AddCapabilityMessage>(msg.Data);
+                var capability = message.Capability;
+                AgreedCapabilities.Add(message.Capability);
+                SupportedCapabilities.Add(message.Capability);
+                if(Logger.IsTrace) Logger.Trace($"{Session.RemoteNodeId} Starting protocolHandler for {capability.ProtocolCode} v{capability.Version} on {Session.RemotePort}");
+                SubprotocolRequested?.Invoke(this, new ProtocolEventArgs(capability.ProtocolCode, capability.Version));
             }
             else
             {
-                Logger.Error($"{P2PSession.RemoteNodeId} Unhandled packet type: {msg.PacketType}");
+                Logger.Error($"{Session.RemoteNodeId} Unhandled packet type: {msg.PacketType}");
             }
         }
 
-        public void HandleHello(HelloMessage hello)
-        {   
-            if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} P2P received hello.");
-            if (!hello.NodeId.Equals(P2PSession.RemoteNodeId))
+        private void HandleHello(HelloMessage hello)
+        {
+            bool isInbound = !_sentHello;
+            
+            if(Logger.IsTrace) Logger.Trace($"{Session} P2P received hello.");     
+            
+            if (!hello.NodeId.Equals(Session.RemoteNodeId))
             {
-                Logger.Error("MISMATCH");
-                throw new NodeDetailsMismatchException();
+                if(Logger.IsDebug) Logger.Debug($"Inconsistent Node ID details - expected {Session.RemoteNodeId}, received hello with {hello.NodeId} on " + (isInbound ? "IN connection" : "OUT connection"));
+                // it does not really matter if there is mismatch - we do not use it anywhere
+//                throw new NodeDetailsMismatchException();
             }
 
             RemoteClientId = hello.ClientId;
+            Session.Node.ClientId = hello.ClientId;
 
             Logger.Trace(!_sentHello
-                ? $"{P2PSession.RemoteNodeId} P2P initiating inbound {hello.Protocol} v{hello.P2PVersion} on {hello.ListenPort} ({hello.ClientId})"
-                : $"{P2PSession.RemoteNodeId} P2P initiating outbound {hello.Protocol} v{hello.P2PVersion} on {hello.ListenPort} ({hello.ClientId})");
+                ? $"{Session.RemoteNodeId} P2P initiating inbound {hello.Protocol}.{hello.P2PVersion} on {hello.ListenPort} ({hello.ClientId})"
+                : $"{Session.RemoteNodeId} P2P initiating outbound {hello.Protocol}.{hello.P2PVersion} on {hello.ListenPort} ({hello.ClientId})");
 
             // https://github.com/ethereum/EIPs/blob/master/EIPS/eip-8.md
             // Clients implementing a newer version simply send a packet with higher version and possibly additional list elements.
@@ -144,26 +174,28 @@ namespace Nethermind.Network.P2P
             ProtocolVersion = hello.P2PVersion;
 
             var capabilities = hello.Capabilities;
+            AvailableCapabilities = new List<Capability>(capabilities);
             foreach (Capability remotePeerCapability in capabilities)
             {
                 if (SupportedCapabilities.Contains(remotePeerCapability))
                 {
-                    if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} Agreed on {remotePeerCapability.ProtocolCode} v{remotePeerCapability.Version}");
+                    if(Logger.IsTrace) Logger.Trace($"{Session.RemoteNodeId} Agreed on {remotePeerCapability.ProtocolCode} v{remotePeerCapability.Version}");
                     AgreedCapabilities.Add(remotePeerCapability);
                 }
                 else
                 {
-                    if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} Capability not supported {remotePeerCapability.ProtocolCode} v{remotePeerCapability.Version}");
+                    if(Logger.IsTrace) Logger.Trace($"{Session.RemoteNodeId} Capability not supported {remotePeerCapability.ProtocolCode} v{remotePeerCapability.Version}");
                 }
             }
 
             _isInitialized = true;
-             
-            if(!capabilities.Any(x => x.ProtocolCode == Protocol.Eth && (x.Version == 62 || x.Version == 63)))
-            {    
-                Disconnect(DisconnectReason.UselessPeer);
+
+            if (!capabilities.Any(x => (x.ProtocolCode == Protocol.Eth && (x.Version == 62 || x.Version == 63))
+                                       || x.ProtocolCode == Protocol.Ndm))
+            {
+                InitiateDisconnect(DisconnectReason.UselessPeer, $"capabilities: {string.Join(", ", capabilities.Select(c => string.Concat(c.ProtocolCode, c.Version)))}");
             }
-                
+
             ReceivedProtocolInitMsg(hello);
 
             var eventArgs = new P2PProtocolInitializedEventArgs(this)
@@ -185,37 +217,39 @@ namespace Nethermind.Network.P2P
             
             if (_pongCompletionSource != null)
             {
-                if (Logger.IsWarn) Logger.Warn($"Another ping request in process: {P2PSession.RemoteNodeId}");
+                if (Logger.IsWarn) Logger.Warn($"Another ping request in process: {Session.RemoteNodeId}");
                 return true;
             }
             
             _pongCompletionSource = new TaskCompletionSource<Packet>();
             var pongTask = _pongCompletionSource.Task;
 
-            if (Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} P2P sending ping on {P2PSession.RemotePort} ({RemoteClientId})");
+            if (Logger.IsTrace) Logger.Trace($"{Session} P2P sending ping on {Session.RemotePort} ({RemoteClientId})");
             Send(PingMessage.Instance);
-            P2PSession?.NodeStats.AddNodeStatsEvent(NodeStatsEventType.P2PPingOut);
+            _nodeStatsManager.ReportEvent(Session.Node, NodeStatsEventType.P2PPingOut);
             var pingPerfCalcId = _perfService.StartPerfCalc(); 
 
-            var firstTask = await Task.WhenAny(pongTask, Task.Delay(Timeouts.P2PPing));
+            CancellationTokenSource delayCancellation = new CancellationTokenSource();
+            var firstTask = await Task.WhenAny(pongTask, Task.Delay(Timeouts.P2PPing, delayCancellation.Token));
             _pongCompletionSource = null;
             if (firstTask != pongTask)
             {
                 return false;
             }
 
+            delayCancellation.Cancel();
             var latency = _perfService.EndPerfCalc(pingPerfCalcId);
             if (latency.HasValue)
             {
-                P2PSession?.NodeStats.AddLatencyCaptureEvent(NodeLatencyStatType.P2PPingPong, latency.Value);
+                _nodeStatsManager.ReportLatencyCaptureEvent(Session.Node, NodeLatencyStatType.P2PPingPong, latency.Value);
             }
 
             return true;
         }
 
-        public void Disconnect(DisconnectReason disconnectReason)
+        public void InitiateDisconnect(DisconnectReason disconnectReason, string details)
         {  
-            if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} P2P disconnecting on {P2PSession.RemotePort} ({RemoteClientId}) [{disconnectReason}]");
+            if(Logger.IsTrace) Logger.Trace($"Sending disconnect {disconnectReason} ({details}) to {Session.Node:s}");
             DisconnectMessage message = new DisconnectMessage(disconnectReason);
             Send(message);
         }
@@ -225,14 +259,14 @@ namespace Nethermind.Network.P2P
         private static readonly List<Capability> SupportedCapabilities = new List<Capability>
         {
             new Capability(Protocol.Eth, 62),
-            new Capability(Protocol.Eth, 63),
+            new Capability(Protocol.Eth, 63)
         };
 
         private void SendHello()
         {
             if (Logger.IsTrace)
             {
-                Logger.Trace($"{P2PSession.RemoteNodeId} P2P sending hello with Client ID {ClientVersion.Description}, protocol {ProtocolVersion}, listen port {ListenPort}");
+                Logger.Trace($"{Session} P2P.{ProtocolVersion} sending hello with Client ID {ClientVersion.Description}, protocol {ProtocolVersion}, listen port {ListenPort}");
             }
 
             var helloMessage = new HelloMessage
@@ -246,26 +280,41 @@ namespace Nethermind.Network.P2P
 
             _sentHello = true;
             Send(helloMessage);
+            Metrics.HellosSent++;
         }
 
         private void HandlePing()
         {
-            if (Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} P2P responding to ping on {P2PSession.RemotePort} ({RemoteClientId})");
+            if (Logger.IsTrace) Logger.Trace($"{Session} P2P responding to ping");
             Send(PongMessage.Instance);
         }
 
-        private void Close(int disconnectReason)
+        private void Close(int disconnectReasonId)
         {
-            if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} P2P received disconnect on {P2PSession.RemotePort} ({RemoteClientId}) [{disconnectReason}]");
+            DisconnectReason disconnectReason = (DisconnectReason) disconnectReasonId;
+
+            if (disconnectReason != DisconnectReason.TooManyPeers && disconnectReason != DisconnectReason.Other && disconnectReason != DisconnectReason.DisconnectRequested)
+            {
+                if (Logger.IsDebug) Logger.Debug($"{Session} received disconnect [{disconnectReason}]");
+            }
+            else
+            {
+                if (Logger.IsTrace) Logger.Trace($"{Session} P2P received disconnect [{disconnectReason}]");
+            }
+
             // Received disconnect message, triggering direct TCP disconnection
-            P2PSession.DisconnectAsync((DisconnectReason) disconnectReason, DisconnectType.Remote);
+            Session.Disconnect(disconnectReason, DisconnectType.Remote, "message");
         }
 
         private void HandlePong(Packet msg)
         {
-            if(Logger.IsTrace) Logger.Trace($"{P2PSession.RemoteNodeId} P2P pong on {P2PSession.RemotePort} ({RemoteClientId})");
-            P2PSession?.NodeStats.AddNodeStatsEvent(NodeStatsEventType.P2PPingIn);
+            if(Logger.IsTrace) Logger.Trace($"{Session} sending P2P pong");
+            _nodeStatsManager.ReportEvent(Session.Node, NodeStatsEventType.P2PPingIn);
             _pongCompletionSource?.TrySetResult(msg);
+        }
+
+        public void Dispose()
+        {
         }
     }
 }

@@ -20,6 +20,8 @@ using System;
 using System.Numerics;
 using Nethermind.Core;
 using Nethermind.Core.Extensions;
+using Nethermind.Core.Specs;
+using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Evm.Precompiles
 {
@@ -36,12 +38,12 @@ namespace Nethermind.Evm.Precompiles
 
         public Address Address { get; } = Address.FromNumber(5);
 
-        public long BaseGasCost()
+        public long BaseGasCost(IReleaseSpec releaseSpec)
         {
             return 0L;
         }
-
-        public long DataGasCost(byte[] inputData)
+        
+        public long DataGasCost(byte[] inputData, IReleaseSpec releaseSpec)
         {
             try
             {
@@ -53,7 +55,7 @@ namespace Nethermind.Evm.Precompiles
 
                 byte[] expSignificantBytes = inputData.SliceWithZeroPaddingEmptyOnError(96 + (int)baseLength, (int)BigInteger.Min(expLength, 32));
 
-                BigInteger lengthOver32 = expLength <= VirtualMachine.BigInt32 ? 0 : expLength - 32;
+                BigInteger lengthOver32 = expLength <= 32 ? 0 : expLength - 32;
                 BigInteger adjusted = AdjustedExponentLength(lengthOver32, expSignificantBytes);
                 BigInteger gas = complexity * BigInteger.Max(adjusted, BigInteger.One) / 20;
                 return (long)gas;
@@ -66,6 +68,8 @@ namespace Nethermind.Evm.Precompiles
 
         public (byte[], bool) Run(byte[] inputData)
         {
+            Metrics.ModExpPrecompile++;
+            
             int baseLength = (int)inputData.SliceWithZeroPaddingEmptyOnError(0, 32).ToUnsignedBigInteger();
             BigInteger expLengthBig = inputData.SliceWithZeroPaddingEmptyOnError(32, 32).ToUnsignedBigInteger();
             int expLength = expLengthBig > int.MaxValue ? int.MaxValue : (int)expLengthBig;
@@ -100,7 +104,7 @@ namespace Nethermind.Evm.Precompiles
 
         private static BigInteger AdjustedExponentLength(BigInteger lengthOver32, byte[] exponent)
         {
-            int leadingZeros = exponent.LeadingZerosCount();
+            int leadingZeros = exponent.AsSpan().LeadingZerosCount();
             if (leadingZeros == exponent.Length)
             {
                 return lengthOver32 * 8;

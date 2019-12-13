@@ -20,7 +20,25 @@ using System;
 
 namespace Nethermind.Evm
 {
-    public class EvmException : Exception
+    public abstract class EvmException : Exception
     {
+        public abstract EvmExceptionType ExceptionType { get; }
+    }
+    
+    public enum EvmExceptionType
+    {
+        None,
+        BadInstruction,
+        StackOverflow,
+        StackUnderflow,
+        OutOfGas,
+        InvalidJumpDestination,
+        AccessViolation,
+        StaticCallViolation,
+        PrecompileFailure,
+        TransactionCollision,
+        NotEnoughBalance,
+        Other,
+        Revert
     }
 }

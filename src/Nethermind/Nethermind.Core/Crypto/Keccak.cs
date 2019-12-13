@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (c) 2018 Demerzel Solutions Limited
  * This file is part of the Nethermind library.
  *
@@ -18,6 +18,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
@@ -25,12 +26,48 @@ using Nethermind.HashLib;
 
 namespace Nethermind.Core.Crypto
 {
+    public unsafe struct ValueKeccak
+    {
+        internal const int Size = 32;
+        public fixed byte Bytes[Size];
+
+        public Span<byte> BytesAsSpan =>  MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref this, 1));
+        
+        /// <returns>
+        ///     <string>0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470</string>
+        /// </returns>
+        public static readonly ValueKeccak OfAnEmptyString = InternalCompute(new byte[] { });
+        
+        
+        [DebuggerStepThrough]
+        public static ValueKeccak Compute(Span<byte> input)
+        {
+            if (input == null || input.Length == 0)
+            {
+                return OfAnEmptyString;
+            }
+
+            var result = new ValueKeccak();
+            byte* ptr = result.Bytes;
+            var output = new Span<byte>(ptr, KeccakHash.HASH_SIZE);
+            KeccakHash.ComputeHashBytesToSpan(input, output);
+            return result;
+        }
+        
+        private static ValueKeccak InternalCompute(byte[] input)
+        {
+            var result = new ValueKeccak();
+            byte* ptr = result.Bytes;
+            var output = new Span<byte>(ptr, KeccakHash.HASH_SIZE);
+            KeccakHash.ComputeHashBytesToSpan(input, output);
+            return result;
+        }
+    }
+    
     [DebuggerStepThrough]
     public class Keccak : IEquatable<Keccak>
     {
-        private const int Size = 32;
-
-        [ThreadStatic] private static HashLib.Crypto.SHA3.Keccak256 _hash;
+        internal const int Size = 32;
 
         public Keccak(string hexString)
             : this(Extensions.Bytes.FromHexString(hexString))
@@ -74,6 +111,12 @@ namespace Nethermind.Core.Crypto
         {
             return ToString(true);
         }
+        
+        public string ToShortString()
+        {
+            string hash = Bytes?.ToHexString(false);
+            return $"{hash?.Substring(0, 6)}...{hash?.Substring(hash.Length - 6)}";
+        }
 
         public string ToString(bool withZeroX)
         {
@@ -99,7 +142,7 @@ namespace Nethermind.Core.Crypto
                 return OfAnEmptyString;
             }
 
-            return InternalCompute(input);
+            return new Keccak(KeccakHash.ComputeHashBytes(input));
         }
 
         [DebuggerStepThrough]
@@ -110,32 +153,12 @@ namespace Nethermind.Core.Crypto
                 return OfAnEmptyString;
             }
 
-            return InternalCompute(input);
-        }
-
-        private static HashLib.Crypto.SHA3.Keccak256 Init()
-        {
-            return HashFactory.Crypto.SHA3.CreateKeccak256();
-        }
-
-        private static Keccak InternalCompute(Span<byte> input)
-        {
-            if (_hash == null) // avoid allocating Init func
-            {
-                LazyInitializer.EnsureInitialized(ref _hash, Init);
-            }
-
-            return new Keccak(_hash.ComputeBytes(input).GetBytes());
+            return new Keccak(KeccakHash.ComputeHashBytes(input));
         }
 
         private static Keccak InternalCompute(byte[] input)
         {
-            if (_hash == null) // avoid allocating Init func
-            {
-                LazyInitializer.EnsureInitialized(ref _hash, Init);
-            }
-
-            return new Keccak(_hash.ComputeBytes(input).GetBytes());
+            return new Keccak(KeccakHash.ComputeHashBytes(input.AsSpan()));
         }
 
         [DebuggerStepThrough]
@@ -196,6 +219,18 @@ namespace Nethermind.Core.Crypto
         public static bool operator !=(Keccak a, Keccak b)
         {
             return !(a == b);
+        }
+        
+        public static Keccak TryParse(string hexString)
+        {
+            try
+            {
+                return new Keccak(hexString);
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }

@@ -16,55 +16,26 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using System.IO;
-
 namespace Nethermind.Network.Config
 {
     public class NetworkConfig : INetworkConfig
     {
-        public int BucketSize { get; set; } = 16;
-        public int BucketsCount { get; set; } = 256;
-        public int Concurrency { get; set; } = 3;
-
-        public int BitsPerHop { get; set; } = 8;
-
-        //public string MasterHost => "127.0.0.1";
-        public string MasterHost { get; set; } = "127.0.0.1"; //=> "192.168.1.154";
-        public string MasterExternalIp { get; set; } = "127.0.0.1";
-        public int MasterPort { get; set; } = 30304;
-        public int MaxDiscoveryRounds { get; set; } = 8;
-        public int EvictionCheckInterval { get; set; } = 75;
-        public int SendNodeTimeout { get; set; } = 500;
-        public int PongTimeout { get; set; } = 1000 * 15;
-        public int BootNodePongTimeout { get; set; } = 1000 * 100;
-        public int PingRetryCount { get; set; } = 3;
-        public int DiscoveryInterval { get; set; } = 1000 * 30;
-        public int DiscoveryPersistenceInterval { get; set; } = 1000 * 5;
-        public int DiscoveryNewCycleWaitTime { get; set; } = 50;
-        //public int RefreshInterval { get; set; } = 33000;
-
-        public ConfigNode[] BootNodes { get; set; } = new ConfigNode[0];
-
-        public string KeyPass { get; set; } = "TestPass";
-        public int UdpChannelCloseTimeout { get; set; } = 1000 * 5;
-        public int PingMessageVersion { get; set; } = 4;
-        public int DiscoveryMsgExpiryTime { get; set; } = 60 * 90;
-        public int MaxNodeLifecycleManagersCount { get; set; } = 2000;
-        public int NodeLifecycleManagersCleaupCount { get; set; } = 200;
-        
-        public ConfigNode[] TrustedPeers { get; set; } = new ConfigNode[0];
-        public string DbBasePath { get; set; } = Path.GetTempPath();
-        public bool IsDiscoveryNodesPersistenceOn { get; set; } = true;
+        public string ExternalIp { get; set; } = null;
+        public string LocalIp { get; set; }
+        public string StaticPeers { get; set; }
+        public string TrustedPeers { get; set; } = string.Empty;
         public bool IsPeersPersistenceOn { get; set; } = true;
-        public int ActivePeerUpdateInterval { get; set; } = 1000 * 3;
-        public bool IsActivePeerTimerEnabled { get; set; } = true;
-        public int ActivePeersMaxCount { get; set; } = 25;
-        public int DisconnectDelay { get; set; } = 1000 * 60 * 5;
-        public int FailedConnectionDelay { get; set; } = 1000 * 60 * 10;
+        public int ActivePeersMaxCount { get; set; } = 50;
         public int PeersPersistenceInterval { get; set; } = 1000 * 5;
+        public int PeersUpdateInterval { get; set; } = 100;
         public int P2PPingInterval { get; set; } = 1000 * 10;
-        public int P2PPingRetryCount { get; set; } = 3;
-        public bool CaptureNodeStatsEventHistory { get; } = true;
-        public string DetailedTimeDateFormat { get; } = "yyyy-MM-dd HH:mm:ss.fff";
+        public int MaxPersistedPeerCount { get; set; } = 2000;
+        public int PersistedPeerCountCleanupThreshold { get; set; } = 2200;
+        public int MaxCandidatePeerCount { get; set; } = 10000;
+        public int CandidatePeerCountCleanupThreshold { get; set; } = 11000;
+        
+        public int DiscoveryPort { get; set; } = 30303;
+        
+        public int P2PPort { get; set; } = 30303;
     }
 }

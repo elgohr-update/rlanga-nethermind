@@ -1,14 +1,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
-using Nethermind.Blockchain.TransactionPools;
-using Nethermind.Blockchain.TransactionPools.Filters;
+using Nethermind.Blockchain.TxPools;
+using Nethermind.Blockchain.TxPools.Filters;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
 using Nethermind.Dirichlet.Numerics;
+using Nethermind.Logging;
 using NUnit.Framework;
 
 namespace Nethermind.Blockchain.Test
@@ -16,21 +16,21 @@ namespace Nethermind.Blockchain.Test
     [TestFixture]
     public class TransactionFilterTests
     {
-        private IEthereumSigner _ethereumSigner;
+        private IEthereumEcdsa _ethereumEcdsa;
         private ISpecProvider _specProvider;
-        private ITransactionFilter _filter;
+        private ITxFilter _filter;
 
         [SetUp]
         public void Setup()
         {
             _specProvider = RopstenSpecProvider.Instance;
-            _ethereumSigner = new EthereumSigner(_specProvider, NullLogManager.Instance);
+            _ethereumEcdsa = new EthereumEcdsa(_specProvider, NullLogManager.Instance);
         }
 
         [Test]
         public void should_accept_any_transaction_when_using_accept_all_filter()
         {
-            _filter = new AcceptAllTransactionFilter();
+            _filter = new AcceptAllTxFilter();
             var transactions = GetTransactions();
             var addedTransactions = ApplyFilter(transactions);
             addedTransactions.Length.Should().Be(transactions.Length);
@@ -39,7 +39,7 @@ namespace Nethermind.Blockchain.Test
         [Test]
         public void should_not_accept_any_transaction_when_using_reject_all_filter()
         {
-            _filter = new RejectAllTransactionFilter();
+            _filter = new RejectAllTxFilter();
             var transactions = GetTransactions();
             var addedTransactions = ApplyFilter(transactions);
             addedTransactions.Should().BeEmpty();
@@ -48,7 +48,7 @@ namespace Nethermind.Blockchain.Test
         [Test]
         public void should_add_some_transactions_to_storage_when_using_accept_when_filter()
         {
-            _filter = AcceptWhenTransactionFilter
+            _filter = AcceptWhenTxFilter
                 .Create()
                 .Nonce(n => n >= 0)
                 .GasPrice(p => p > 2 && p < 1500)
@@ -64,14 +64,14 @@ namespace Nethermind.Blockchain.Test
         private Transaction[] GetTransactions()
             => new[]
             {
-                GetTransaction(0, 1000, 10, Address.Zero, new byte[0], TestObject.PrivateKeyA),
-                GetTransaction(0, 500, 2, Address.FromNumber(1), new byte[0], TestObject.PrivateKeyB),
-                GetTransaction(1, 2000, 50, Address.FromNumber(3), new byte[0], TestObject.PrivateKeyC),
-                GetTransaction(2, 10000, 100, Address.FromNumber(2), new byte[0], TestObject.PrivateKeyD),
-                GetTransaction(3, 4000, 5, Address.Zero, new byte[0], TestObject.PrivateKeyC)
+                GetTransaction(0, 1000, 10, Address.Zero, new byte[0], TestItem.PrivateKeyA),
+                GetTransaction(0, 500, 2, Address.FromNumber(1), new byte[0], TestItem.PrivateKeyB),
+                GetTransaction(1, 2000, 50, Address.FromNumber(3), new byte[0], TestItem.PrivateKeyC),
+                GetTransaction(2, 10000, 100, Address.FromNumber(2), new byte[0], TestItem.PrivateKeyD),
+                GetTransaction(3, 4000, 5, Address.Zero, new byte[0], TestItem.PrivateKeyC)
             };
 
-        private Transaction GetTransaction(UInt256 nonce, UInt256 gasLimit,
+        private Transaction GetTransaction(UInt256 nonce, long gasLimit,
             UInt256 gasPrice, Address to, byte[] data, PrivateKey privateKey)
             => Build.A.Transaction
                 .WithNonce(nonce)
@@ -80,7 +80,7 @@ namespace Nethermind.Blockchain.Test
                 .WithData(data)
                 .To(to)
                 .DeliveredBy(privateKey.PublicKey)
-                .SignedAndResolved(_ethereumSigner, privateKey, 1)
+                .SignedAndResolved(_ethereumEcdsa, privateKey, 1)
                 .TestObject;
     }
 }

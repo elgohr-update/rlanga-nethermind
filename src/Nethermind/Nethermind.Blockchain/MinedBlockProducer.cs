@@ -23,12 +23,13 @@ using System.Numerics;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Nethermind.Blockchain.TransactionPools;
+using Nethermind.Blockchain.TxPools;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm;
+using Nethermind.Evm.Tracing;
+using Nethermind.Logging;
 using Nethermind.Mining;
 using Nethermind.Mining.Difficulty;
 
@@ -40,28 +41,28 @@ namespace Nethermind.Blockchain
         private static readonly BigInteger MinGasPriceForMining = 1;
 
         private readonly IBlockchainProcessor _processor;
-        private readonly ISealEngine _sealEngine;
+        private readonly ISealer _sealer;
         private readonly IBlockTree _blockTree;
-        private readonly ITimestamp _timestamp;
+        private readonly ITimestamper _timestamper;
         private readonly IDifficultyCalculator _difficultyCalculator;
-        private readonly ITransactionPool _transactionPool;
+        private readonly ITxPool _txPool;
         private readonly ILogger _logger;
 
         public MinedBlockProducer(
             IDifficultyCalculator difficultyCalculator,
-            ITransactionPool transactionPool,
+            ITxPool txPool,
             IBlockchainProcessor processor,
-            ISealEngine sealEngine,
+            ISealer sealer,
             IBlockTree blockTree,
-            ITimestamp timestamp,
+            ITimestamper timestamper,
             ILogManager logManager)
         {
             _difficultyCalculator = difficultyCalculator ?? throw new ArgumentNullException(nameof(difficultyCalculator));
-            _transactionPool = transactionPool ?? throw new ArgumentNullException(nameof(transactionPool));
+            _txPool = txPool ?? throw new ArgumentNullException(nameof(txPool));
             _processor = processor ?? throw new ArgumentNullException(nameof(processor));
-            _sealEngine = sealEngine ?? throw new ArgumentNullException(nameof(sealEngine));
+            _sealer = sealer ?? throw new ArgumentNullException(nameof(sealer));
             _blockTree = blockTree ?? throw new ArgumentNullException(nameof(blockTree));
-            _timestamp = timestamp;
+            _timestamper = timestamper;
             _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
         }
 
@@ -85,11 +86,6 @@ namespace Nethermind.Blockchain
                 _cancellationTokenSource = new CancellationTokenSource();
                 token = _cancellationTokenSource.Token;
             }
-
-            if (!_sealEngine.IsMining)
-            {
-                return;
-            }
             
             Block block = PrepareBlock();
             if (block == null)
@@ -98,8 +94,8 @@ namespace Nethermind.Blockchain
                 return;
             }
 
-            Block processedBlock = _processor.Process(block, ProcessingOptions.NoValidation | ProcessingOptions.ReadOnlyChain | ProcessingOptions.WithRollback, NullTraceListener.Instance);
-            _sealEngine.MineAsync(processedBlock, token).ContinueWith(t =>
+            Block processedBlock = _processor.Process(block, ProcessingOptions.NoValidation | ProcessingOptions.ReadOnlyChain | ProcessingOptions.WithRollback, NullBlockTracer.Instance);
+            _sealer.SealBlock(processedBlock, token).ContinueWith(t =>
             {
                 if (t.IsCompletedSuccessfully)
                 {
@@ -111,7 +107,7 @@ namespace Nethermind.Blockchain
                 }
                 else if(t.IsCanceled)
                 {
-                    if(_logger.IsDebug) _logger.Debug($"Mining block {processedBlock.ToString(Block.Format.HashAndNumber)} cancelled");
+                    if(_logger.IsDebug) _logger.Debug($"Mining block {processedBlock.ToString(Block.Format.FullHashAndNumber)} cancelled");
                 }
             }, token);
         }
@@ -124,10 +120,10 @@ namespace Nethermind.Blockchain
                 return null;
             }
 
-            Block parent = _blockTree.FindBlock(parentHeader.Hash, false);
-            UInt256 timestamp = _timestamp.EpochSeconds;
+            Block parent = _blockTree.FindBlock(parentHeader.Hash, BlockTreeLookupOptions.None);
+            UInt256 timestamp = _timestamper.EpochSeconds;
 
-            UInt256 difficulty = _difficultyCalculator.Calculate(parent.Difficulty, parent.Timestamp, _timestamp.EpochSeconds, parent.Number + 1, parent.Ommers.Length > 0);
+            UInt256 difficulty = _difficultyCalculator.Calculate(parent.Difficulty, parent.Timestamp, _timestamper.EpochSeconds, parent.Number + 1, parent.Ommers.Length > 0);
             BlockHeader header = new BlockHeader(
                 parent.Hash,
                 Keccak.OfAnEmptySequenceRlp,
@@ -139,9 +135,10 @@ namespace Nethermind.Blockchain
                 Encoding.UTF8.GetBytes("Nethermind"));
 
             header.TotalDifficulty = parent.TotalDifficulty + difficulty;
+            
             if (_logger.IsDebug) _logger.Debug($"Setting total difficulty to {parent.TotalDifficulty} + {difficulty}.");
 
-            var transactions = _transactionPool.GetPendingTransactions().OrderBy(t => t?.Nonce); // by nonce in case there are two transactions for the same account, TODO: test it
+            var transactions = _txPool.GetPendingTransactions().OrderBy(t => t?.Nonce); // by nonce in case there are two transactions for the same account, TODO: test it
 
             List<Transaction> selected = new List<Transaction>();
             BigInteger gasRemaining = header.GasLimit;
@@ -172,10 +169,10 @@ namespace Nethermind.Blockchain
                 selected.Add(transaction);
                 gasRemaining -= transaction.GasLimit;
             }
-
+            
             if (_logger.IsDebug) _logger.Debug($"Collected {selected.Count} out of {total} pending transactions.");
             Block block = new Block(header, selected, new BlockHeader[0]);
-            header.TransactionsRoot = block.CalculateTransactionsRoot();
+            header.TxRoot = block.CalculateTxRoot();
             return block;
         }
 

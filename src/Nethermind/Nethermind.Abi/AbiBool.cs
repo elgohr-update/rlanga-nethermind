@@ -28,7 +28,7 @@ namespace Nethermind.Abi
 
         public override string Name => "bool";
 
-        public override byte[] Encode(object arg)
+        public override byte[] Encode(object arg, bool packed)
         {
             if (arg is bool input)
             {
@@ -38,7 +38,7 @@ namespace Nethermind.Abi
             throw new AbiException(AbiEncodingExceptionMessage);
         }
 
-        public override (object, int) Decode(byte[] data, int position)
+        public override (object, int) Decode(byte[] data, int position, bool packed)
         {
             return (data[position] == 1, position + 1);
         }

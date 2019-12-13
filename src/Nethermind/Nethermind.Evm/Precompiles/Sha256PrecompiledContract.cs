@@ -17,37 +17,50 @@
  */
 
 using System.Security.Cryptography;
+using System.Threading;
 using Nethermind.Core;
+using Nethermind.Core.Specs;
 
 namespace Nethermind.Evm.Precompiles
 {
     public class Sha256PrecompiledContract : IPrecompiledContract
     {
+        private static ThreadLocal<SHA256> _sha256 = new ThreadLocal<SHA256>();
+        
         public static readonly IPrecompiledContract Instance = new Sha256PrecompiledContract();
-
-        private static SHA256 _sha256;
 
         private Sha256PrecompiledContract()
         {
-            _sha256 = SHA256.Create();
-            _sha256.Initialize();
+            InitIfNeeded();
+        }
+
+        private static void InitIfNeeded()
+        {
+            if (!_sha256.IsValueCreated)
+            {
+                var sha = SHA256.Create();
+                sha.Initialize();
+                _sha256.Value = sha;
+            }
         }
 
         public Address Address { get; } = Address.FromNumber(2);
 
-        public long BaseGasCost()
+        public long BaseGasCost(IReleaseSpec releaseSpec)
         {
             return 60L;
         }
 
-        public long DataGasCost(byte[] inputData)
+        public long DataGasCost(byte[] inputData, IReleaseSpec releaseSpec)
         {
-            return 12L * EvmPooledMemory.Div32Ceiling((ulong)inputData.Length);
+            return 12L * EvmPooledMemory.Div32Ceiling((ulong) inputData.Length);
         }
 
-        public (byte[],bool) Run(byte[] inputData)
+        public (byte[], bool) Run(byte[] inputData)
         {
-            return (_sha256.ComputeHash(inputData), true);
+            Metrics.Sha256Precompile++;
+            InitIfNeeded();
+            return (_sha256.Value.ComputeHash(inputData), true);
         }
     }
 }

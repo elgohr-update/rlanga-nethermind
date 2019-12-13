@@ -23,63 +23,68 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
 using Nethermind.Network.Discovery.Messages;
-using Nethermind.Stats;
+using NLog;
 
 namespace Nethermind.Network.Discovery.Serializers
 {
     public abstract class DiscoveryMessageSerializerBase
     {
         private readonly PrivateKey _privateKey;
-        private readonly ISigner _signer;
+        private readonly IEcdsa _ecdsa;
 
-        protected readonly IDiscoveryMessageFactory MessageFactory;
-        protected readonly INodeIdResolver NodeIdResolver;
-        protected readonly INodeFactory NodeFactory;
+        private readonly IDiscoveryMessageFactory _messageFactory;
+        private readonly INodeIdResolver _nodeIdResolver;
 
         protected DiscoveryMessageSerializerBase(
-            ISigner signer,
+            IEcdsa ecdsa,
             IPrivateKeyGenerator privateKeyGenerator,
             IDiscoveryMessageFactory messageFactory,
-            INodeIdResolver nodeIdResolver,
-            INodeFactory nodeFactory)
+            INodeIdResolver nodeIdResolver)
         {
-            _signer = signer ?? throw new ArgumentNullException(nameof(signer));
+            _ecdsa = ecdsa ?? throw new ArgumentNullException(nameof(ecdsa));
             _privateKey = privateKeyGenerator.Generate() ?? throw new ArgumentNullException(nameof(_privateKey));
-            MessageFactory = messageFactory ?? throw new ArgumentNullException(nameof(messageFactory));
-            NodeIdResolver = nodeIdResolver ?? throw new ArgumentNullException(nameof(nodeIdResolver));
-            NodeFactory = nodeFactory ?? throw new ArgumentNullException(nameof(nodeFactory));
+            _messageFactory = messageFactory ?? throw new ArgumentNullException(nameof(messageFactory));
+            _nodeIdResolver = nodeIdResolver ?? throw new ArgumentNullException(nameof(nodeIdResolver));
         }
 
-        protected byte[] Serialize(byte[] type, byte[] data)
+        protected byte[] Serialize(byte type, Span<byte> data)
         {
-            byte[] payload = Bytes.Concat(type[0], data);
+            Span<byte> result = new byte[32 + 1 + data.Length + 64 + 1].AsSpan();
+            result[32 + 65] = type;
+            data.CopyTo(result.Slice(32 + 65 + 1, data.Length));
+
+            Span<byte> payload = result.Slice(32 + 65);
             Keccak toSign = Keccak.Compute(payload);
-            Signature signature = _signer.Sign(_privateKey, toSign);
-            byte[] signatureBytes = Bytes.Concat(signature.Bytes, signature.RecoveryId);
-            byte[] mdc = Keccak.Compute(Bytes.Concat(signatureBytes, type, data)).Bytes;
-            return Bytes.Concat(mdc, signatureBytes, type, data);
+            Signature signature = _ecdsa.Sign(_privateKey, toSign);
+            signature.Bytes.AsSpan().CopyTo(result.Slice(32, 64));
+            result[32 + 64] = signature.RecoveryId;
+            
+            Span<byte> forMdc = result.Slice(32);
+            Keccak mdc = Keccak.Compute(forMdc);
+            mdc.Bytes.AsSpan().CopyTo(result.Slice(0,32));
+            return result.ToArray();
         }
 
         protected (T Message, byte[] Mdc, byte[] Data) PrepareForDeserialization<T>(byte[] msg) where T : DiscoveryMessage
         {
             if (msg.Length < 98)
             {
-                throw new NetworkingException("Incorrect message", NetwokExceptionType.Validation);
+                throw new NetworkingException("Incorrect message", NetworkExceptionType.Validation);
             }
 
             var mdc = msg.Slice(0, 32);
             var signature = msg.Slice(32, 65);
-            var type = new[] { msg[97] };
+            // var type = new[] { msg[97] };
             var data = msg.Slice(98, msg.Length - 98);
             var computedMdc = Keccak.Compute(msg.Slice(32)).Bytes;
 
             if (!Bytes.AreEqual(mdc, computedMdc))
             {
-                throw new NetworkingException("Invalid MDC", NetwokExceptionType.Validation);
+                throw new NetworkingException("Invalid MDC", NetworkExceptionType.Validation);
             }
 
-            var nodeId = NodeIdResolver.GetNodeId(signature.Slice(0, 64), signature[64], type, data);
-            var message = MessageFactory.CreateIncomingMessage<T>(nodeId.PublicKey);
+            var nodeId = _nodeIdResolver.GetNodeId(signature.Slice(0, 64), signature[64], msg.Slice(97, msg.Length - 97));
+            var message = _messageFactory.CreateIncomingMessage<T>(nodeId);
             return (message, mdc, data);
         }
 
@@ -106,7 +111,7 @@ namespace Nethermind.Network.Discovery.Serializers
             );
         }
 
-        protected IPEndPoint GetAddress(byte[] ip, int port)
+        protected static IPEndPoint GetAddress(byte[] ip, int port)
         {
             IPAddress ipAddress;
             try
@@ -117,7 +122,7 @@ namespace Nethermind.Network.Discovery.Serializers
             {
                 ipAddress = IPAddress.Any;
             }
-            
+
             return new IPEndPoint(ipAddress, port);
         }
     }

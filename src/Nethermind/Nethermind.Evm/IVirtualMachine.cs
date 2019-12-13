@@ -18,12 +18,17 @@
 
 using Nethermind.Core;
 using Nethermind.Core.Specs;
+using Nethermind.Evm.Tracing;
 
 namespace Nethermind.Evm
 {
     public interface IVirtualMachine
     {
-        TransactionSubstate Run(EvmState state, IReleaseSpec spec, bool enableTracing);
-        CodeInfo GetCachedCodeInfo(Address codeSource); // TODO: this needs to be removed when we refine the API around making calls
+        TransactionSubstate Run(EvmState state, ITxTracer tracer);
+        
+        [Todo(Improve.Refactor, "Remove this responsibility from VM")]
+        CodeInfo GetCachedCodeInfo(Address codeSource);
+
+        void DisableSimdInstructions();
     }
 }

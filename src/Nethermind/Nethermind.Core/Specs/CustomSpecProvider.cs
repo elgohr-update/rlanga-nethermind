@@ -19,16 +19,24 @@
 using System;
 using System.Linq;
 using System.Numerics;
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Core.Specs.Forks;
 
 namespace Nethermind.Core.Specs
 {
     public class CustomSpecProvider : ISpecProvider
     {
-        private readonly (UInt256 BlockNumber, IReleaseSpec Release)[] _transitions;
+        private readonly (long BlockNumber, IReleaseSpec Release)[] _transitions;
 
-        public CustomSpecProvider(params (UInt256 BlockNumber, IReleaseSpec Release)[] transitions)
+        public int ChainId { get; }
+
+        public CustomSpecProvider(params (long BlockNumber, IReleaseSpec Release)[] transitions) : this(0, transitions)
         {
+        }
+
+        public CustomSpecProvider(int chainId, params (long BlockNumber, IReleaseSpec Release)[] transitions)
+        {
+            ChainId = chainId;
+            
             if (transitions.Length == 0)
             {
                 throw new ArgumentException($"There must be at least one release specified when instantiating {nameof(CustomSpecProvider)}", $"{nameof(transitions)}");
@@ -41,12 +49,10 @@ namespace Nethermind.Core.Specs
                 throw new ArgumentException($"First release specified when instantiating {nameof(CustomSpecProvider)} should be at genesis block (0)", $"{nameof(transitions)}");
             }
         }
-
-        public IReleaseSpec CurrentSpec => _transitions.Last().Release;
-
-        public IReleaseSpec GenesisSpec => _transitions.First().Release;
         
-        public IReleaseSpec GetSpec(UInt256 blockNumber)
+        public IReleaseSpec GenesisSpec => _transitions.Length == 0 ? null : _transitions[0].Release;
+        
+        public IReleaseSpec GetSpec(long blockNumber)
         {
             IReleaseSpec spec = _transitions[0].Release;
             for (int i = 1; i < _transitions.Length; i++)
@@ -64,15 +70,14 @@ namespace Nethermind.Core.Specs
             return spec;
         }
 
-        public UInt256? DaoBlockNumber
+        public long? DaoBlockNumber
         {
             get
             {
-                (UInt256 blockNumber, IReleaseSpec daoRelease) = _transitions.SingleOrDefault(t => t.Release == Dao.Instance);
-                return daoRelease != null ? blockNumber : (UInt256?)null;
+                (long blockNumber, IReleaseSpec daoRelease) = _transitions.SingleOrDefault(t => t.Release == Dao.Instance);
+                return daoRelease != null ? blockNumber : (long?)null;
             }
         }
 
-        public int ChainId => 0;
     }
 }

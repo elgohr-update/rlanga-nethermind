@@ -17,142 +17,193 @@
  */
 
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Numerics;
 using System.Reflection;
-using System.Runtime.InteropServices.WindowsRuntime;
-using Nethermind.Config;
+using System.Threading.Tasks;
 using Nethermind.Core;
-using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
+using Nethermind.Core.Json;
 using Nethermind.Core.Model;
-using Nethermind.JsonRpc.Config;
-using Nethermind.JsonRpc.DataModel;
-using Nethermind.JsonRpc.Module;
+using Nethermind.Dirichlet.Numerics;
+using Nethermind.JsonRpc.Modules;
+using Nethermind.Logging;
+using Newtonsoft.Json;
+using JsonSerializer = Newtonsoft.Json.JsonSerializer;
 
 namespace Nethermind.JsonRpc
 {
+    [Todo(Improve.Refactor, "Use JsonConverters and JSON serialization everywhere")]
     public class JsonRpcService : IJsonRpcService
     {
-        private readonly ILogger _logger;
-        private readonly IJsonRpcConfig _jsonRpcConfig;
-        private readonly IModuleProvider _moduleProvider;
+        public static IDictionary<ErrorType, int> ErrorCodes => new Dictionary<ErrorType, int>
+        {
+            {ErrorType.ParseError, -32700},
+            {ErrorType.InvalidRequest, -32600},
+            {ErrorType.MethodNotFound, -32601},
+            {ErrorType.InvalidParams, -32602},
+            {ErrorType.InternalError, -32603},
+            {ErrorType.ExecutionError, -32015},
+            {ErrorType.NotFound, -32601}, // ??
+        };
 
-        public JsonRpcService(IModuleProvider moduleProvider, IConfigProvider configurationProvider, ILogManager logManager)
+        public const string JsonRpcVersion = "2.0";
+
+        private readonly ILogger _logger;
+        private readonly IRpcModuleProvider _rpcModuleProvider;
+        private readonly JsonSerializer _serializer;
+
+        private Dictionary<Type, JsonConverter> _converterLookup = new Dictionary<Type, JsonConverter>();
+
+        public JsonRpcService(IRpcModuleProvider rpcModuleProvider, ILogManager logManager)
         {
             _logger = logManager.GetClassLogger();
-            _jsonRpcConfig = configurationProvider.GetConfig<IJsonRpcConfig>();
-            _moduleProvider = moduleProvider;
+            _rpcModuleProvider = rpcModuleProvider;
+            _serializer = new JsonSerializer();
+
+            foreach (JsonConverter converter in rpcModuleProvider.Converters)
+            {
+                if (_logger.IsDebug) _logger.Debug($"Registering {converter.GetType().Name} inside {nameof(JsonRpcService)}");
+                _serializer.Converters.Add(converter);
+                _converterLookup.Add(converter.GetType().BaseType.GenericTypeArguments[0], converter);
+                Converters.Add(converter);
+            }
+
+            foreach (JsonConverter converter in EthereumJsonSerializer.BasicConverters)
+            {
+                if (_logger.IsDebug) _logger.Debug($"Registering {converter.GetType().Name} (default)");
+                _serializer.Converters.Add(converter);
+                _converterLookup.Add(converter.GetType().BaseType.GenericTypeArguments[0], converter);
+                Converters.Add(converter);
+            }
         }
 
-        public JsonRpcResponse SendRequest(JsonRpcRequest rpcRequest)
+        public async Task<JsonRpcResponse> SendRequestAsync(JsonRpcRequest rpcRequest)
         {
             try
             {
                 (ErrorType? errorType, string errorMessage) = Validate(rpcRequest);
                 if (errorType.HasValue)
                 {
-                    return GetErrorResponse(errorType.Value, errorMessage, rpcRequest.Id, rpcRequest?.Method);
+                    return GetErrorResponse(errorType.Value, errorMessage, rpcRequest.Id, rpcRequest.Method);
                 }
+
                 try
                 {
-                    return ExecuteRequest(rpcRequest);
+                    return await ExecuteRequestAsync(rpcRequest);
                 }
                 catch (TargetInvocationException ex)
                 {
-                    _logger.Error($"Error during method execution, request: {rpcRequest}", ex.InnerException);
-                    return GetErrorResponse(ErrorType.InternalError, "Internal error", rpcRequest.Id, rpcRequest?.Method);
+                    if (_logger.IsError) _logger.Error($"Error during method execution, request: {rpcRequest}", ex.InnerException);
+                    return GetErrorResponse(ErrorType.InternalError, ex.InnerException.ToString(), rpcRequest.Id, rpcRequest.Method);
                 }
                 catch (Exception ex)
                 {
-                    _logger.Error($"Error during method execution, request: {rpcRequest}", ex);
-                    return GetErrorResponse(ErrorType.InternalError, "Internal error", rpcRequest.Id, rpcRequest?.Method);
+                    if (_logger.IsError) _logger.Error($"Error during method execution, request: {rpcRequest}", ex);
+                    return GetErrorResponse(ErrorType.InternalError, ex.InnerException.ToString(), rpcRequest.Id, rpcRequest.Method);
                 }
             }
             catch (Exception ex)
             {
-                _logger.Error($"Error during validation, request: {rpcRequest}", ex);
+                if (_logger.IsError) _logger.Error($"Error during validation, request: {rpcRequest}", ex);
                 return GetErrorResponse(ErrorType.ParseError, "Incorrect message", 0, null);
-            }         
+            }
         }
-        private JsonRpcResponse ExecuteRequest(JsonRpcRequest rpcRequest)
+
+        private async Task<JsonRpcResponse> ExecuteRequestAsync(JsonRpcRequest rpcRequest)
         {
             var methodName = rpcRequest.Method.Trim().ToLower();
-            
-            var module = _moduleProvider.GetEnabledModules().FirstOrDefault(x => x.MethodDictionary.ContainsKey(methodName));
-            if (module != null)
+
+            var result = _rpcModuleProvider.Resolve(methodName);
+            if (result != null)
             {
-                return Execute(rpcRequest, methodName, module.MethodDictionary[methodName], module.ModuleObject);
+                return await ExecuteAsync(rpcRequest, methodName, result);
             }
 
             return GetErrorResponse(ErrorType.MethodNotFound, $"Method {rpcRequest.Method} is not supported", rpcRequest.Id, methodName);
         }
 
-        private JsonRpcResponse Execute(JsonRpcRequest request, string methodName, MethodInfo method, object module)
+        private async Task<JsonRpcResponse> ExecuteAsync(JsonRpcRequest request, string methodName, MethodInfo method)
         {
             var expectedParameters = method.GetParameters();
             var providedParameters = request.Params;
-            if (expectedParameters.Length != (providedParameters?.Length ?? 0))
+            if(_logger.IsInfo) _logger.Info($"Executing JSON RPC call {methodName} with params {string.Join(',', providedParameters)}");
+            
+            int missingParamsCount = expectedParameters.Length - (providedParameters?.Length ?? 0) + providedParameters?.Count(string.IsNullOrWhiteSpace) ?? 0;
+
+            if (missingParamsCount != 0)
             {
-                return GetErrorResponse(ErrorType.InvalidParams, $"Incorrect parameters count, expected: {expectedParameters.Length}, actual: {providedParameters?.Length ?? 0}", request.Id, methodName);
+                bool incorrectParametersCount = missingParamsCount != 0;
+                if (missingParamsCount > 0)
+                {
+                    incorrectParametersCount = false;
+                    for (int i = 0; i < missingParamsCount; i++)
+                    {
+                        if (!expectedParameters[expectedParameters.Length - missingParamsCount + i].IsOptional)
+                        {
+                            incorrectParametersCount = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (incorrectParametersCount)
+                {
+                    return GetErrorResponse(ErrorType.InvalidParams, $"Incorrect parameters count, expected: {expectedParameters.Length}, actual: {expectedParameters.Length - missingParamsCount}", request.Id, methodName);
+                }
             }
 
             //prepare parameters
             object[] parameters = null;
             if (expectedParameters.Length > 0)
             {
-                parameters = GetParameters(expectedParameters, providedParameters);
+                parameters = DeserializeParameters(expectedParameters, providedParameters, missingParamsCount);
                 if (parameters == null)
                 {
+                    if (_logger.IsError) _logger.Error($"Incorrect JSON RPC parameters when calling {methodName}: {string.Join(", ", providedParameters)}");
                     return GetErrorResponse(ErrorType.InvalidParams, "Incorrect parameters", request.Id, methodName);
                 }
             }
 
             //execute method
-            var result = method.Invoke(module, parameters);
-            if (!(result is IResultWrapper resultWrapper))
+            IResultWrapper resultWrapper = null;
+            IModule module = _rpcModuleProvider.Rent(methodName);
+            try
             {
-                _logger.Error($"Method {methodName} execution result does not implement IResultWrapper");
-                return GetErrorResponse(ErrorType.InternalError, "Internal error", request.Id, methodName);
+                var invocationResult = method.Invoke(module, parameters);
+                if (invocationResult is IResultWrapper wrapper)
+                {
+                    resultWrapper = wrapper;
+                }
+                else if (invocationResult is Task task)
+                {
+                    await task;
+                    resultWrapper = task.GetType().GetProperty("Result").GetValue(task) as IResultWrapper;
+                }
             }
-            
-            if (resultWrapper.GetResult() == null || resultWrapper.GetResult().ResultType == ResultType.Failure)
+            finally
             {
-                _logger.Error($"Error during method: {methodName} execution: {resultWrapper.GetResult()?.Error ?? "no result"}");
-                return GetErrorResponse(ErrorType.InternalError, "Internal error", request.Id, methodName);
+                _rpcModuleProvider.Return(methodName, module);
             }
 
-            //process response
-            var data = resultWrapper.GetData();
-            if (data is byte[] bytes)
+            if (resultWrapper is null)
             {
-                return GetSuccessResponse(bytes.ToHexString(), request.Id);        
+                string errorMessage = $"Method {methodName} execution result does not implement IResultWrapper";
+                if (_logger.IsError) _logger.Error(errorMessage);
+                return GetErrorResponse(ErrorType.InternalError, errorMessage, request.Id, methodName);
             }
-            
-            if (!(data is IEnumerable collection) || data is string)
+
+            Result result = resultWrapper.GetResult();
+            if (result == null || result.ResultType == ResultType.Failure)
             {
-                var json = GetDataObject(data);
-                return GetSuccessResponse(json, request.Id);        
+                if (_logger.IsError) _logger.Error($"Error during method: {methodName} execution: {result?.Error ?? "no result"}");
+                return GetErrorResponse(resultWrapper.GetErrorType(), resultWrapper.GetResult().Error, request.Id, methodName, resultWrapper.GetData());
             }
-            
-            var items = new List<object>();
-            foreach (var item in collection)
-            {
-                var jsonItem = GetDataObject(item);
-                items.Add(jsonItem);
-            }
-            
-            return GetSuccessResponse(items, request.Id);
+
+            return GetSuccessResponse(resultWrapper.GetData(), request.Id);
         }
 
-        private object GetDataObject(object data)
-        {
-            return data is IJsonRpcResult rpcResult ? rpcResult.ToJson() : data?.ToString();
-        }
-
-        private object[] GetParameters(ParameterInfo[] expectedParameters, string[] providedParameters)
+        private object[] DeserializeParameters(ParameterInfo[] expectedParameters, string[] providedParameters, int missingParamsCount)
         {
             try
             {
@@ -162,58 +213,89 @@ namespace Nethermind.JsonRpc
                     var providedParameter = providedParameters[i];
                     var expectedParameter = expectedParameters[i];
                     var paramType = expectedParameter.ParameterType;
+                    if (string.IsNullOrWhiteSpace(providedParameter))
+                    {
+                        executionParameters.Add(Type.Missing);
+                        continue;
+                    }
+
                     object executionParam;
                     if (typeof(IJsonRpcRequest).IsAssignableFrom(paramType))
                     {
                         executionParam = Activator.CreateInstance(paramType);
-                        ((IJsonRpcRequest)executionParam).FromJson(providedParameter);
+                        ((IJsonRpcRequest) executionParam).FromJson(providedParameter);
+                    }
+                    else if (paramType == typeof(string))
+                    {
+                        executionParam = providedParameter;
+                    }
+                    else if (paramType == typeof(string[]))
+                    {
+                        executionParam = _serializer.Deserialize<string[]>(new JsonTextReader(new StringReader(providedParameter)));
                     }
                     else
                     {
-                        executionParam = Convert.ChangeType(providedParameter, paramType);
+                        if (providedParameter.StartsWith('[') || providedParameter.StartsWith('{'))
+                        {
+                            executionParam = JsonConvert.DeserializeObject(providedParameter, paramType, Converters.ToArray());
+                        }
+                        else
+                        {
+                            executionParam = JsonConvert.DeserializeObject($"\"{providedParameter}\"", paramType, Converters.ToArray());
+                        }
                     }
+
                     executionParameters.Add(executionParam);
                 }
+
+                for (int i = 0; i < missingParamsCount; i++)
+                {
+                    executionParameters.Add(Type.Missing);
+                }
+
                 return executionParameters.ToArray();
             }
             catch (Exception e)
             {
-                _logger.Error("Error while parsing parameters", e);
+                if (_logger.IsError) _logger.Error("Error while parsing parameters", e);
                 return null;
             }
         }
 
-        private JsonRpcResponse GetSuccessResponse(object result, BigInteger id)
+        private JsonRpcResponse GetSuccessResponse(object result, UInt256 id)
         {
             var response = new JsonRpcResponse
             {
                 Id = id,
-                Jsonrpc = _jsonRpcConfig.JsonRpcVersion,
+                JsonRpc = JsonRpcVersion,
                 Result = result,
             };
 
             return response;
         }
 
-        public JsonRpcResponse GetErrorResponse(ErrorType errorType, string message)
+        public JsonRpcErrorResponse GetErrorResponse(ErrorType errorType, string message)
         {
             return GetErrorResponse(errorType, message, 0, null);
         }
-        
-        private JsonRpcResponse GetErrorResponse(ErrorType errorType, string message, BigInteger id, string methodName)
+
+        public IList<JsonConverter> Converters { get; } = new List<JsonConverter>();
+
+        private JsonRpcErrorResponse GetErrorResponse(ErrorType errorType, string message, UInt256 id, string methodName, object result = null)
         {
-            _logger.Debug($"Sending error response, method: {methodName ?? "none"}, id: {id}, errorType: {errorType}, message: {message}");
-            var response = new JsonRpcResponse
+            if (_logger.IsDebug) _logger.Debug($"Sending error response, method: {methodName ?? "none"}, id: {id}, errorType: {errorType}, message: {message}");
+            var response = new JsonRpcErrorResponse
             {
-                Jsonrpc = _jsonRpcConfig.JsonRpcVersion,
+                JsonRpc = JsonRpcVersion,
                 Id = id,
                 Error = new Error
                 {
-                    Code = _jsonRpcConfig.ErrorCodes[errorType],
+                    Code = ErrorCodes[errorType],
                     Message = message
-                }
+                },
+                Result = result
             };
-            
+
             return response;
         }
 
@@ -229,17 +311,18 @@ namespace Nethermind.JsonRpc
             {
                 return (ErrorType.InvalidRequest, "Method is required");
             }
+
             methodName = methodName.Trim().ToLower();
 
-            var module = _moduleProvider.GetAllModules().FirstOrDefault(x => x.MethodDictionary.ContainsKey(methodName));
-            if (module == null)
+            var result = _rpcModuleProvider.Check(methodName);
+            if (result == ModuleResolution.Unknown)
             {
                 return (ErrorType.MethodNotFound, $"Method {methodName} is not supported");
             }
 
-            if (_moduleProvider.GetEnabledModules().All(x => x.ModuleType != module.ModuleType))
+            if (result == ModuleResolution.Disabled)
             {
-                return (ErrorType.InvalidRequest, $"{module.ModuleType} Module is disabled");
+                return (ErrorType.InvalidRequest, $"{methodName} found but the containing module is disabled");
             }
 
             return (null, null);

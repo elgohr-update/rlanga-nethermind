@@ -20,16 +20,19 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using Nethermind.Blockchain;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
 using Nethermind.Dirichlet.Numerics;
+using Nethermind.Logging;
 using Nethermind.Store;
+using Nethermind.Wallet;
 using NUnit.Framework;
 
 namespace Nethermind.Clique.Test
@@ -50,7 +53,9 @@ namespace Nethermind.Clique.Test
             new PrivateKey("9BD8E918E3176E86D406BFCE261D4CD2589167E3DBD0236B08B0B285783D7553"),
             new PrivateKey("7DC56B10FD1EC64A8BF7547D3BAA254ACB96E8F2AD5A006DD2EBF9C40409A2CE")
         };
-        private CliqueSealEngine _clique;
+        private CliqueSealer _clique;
+        private CliqueSealValidator _sealValidator;
+        private SnapshotManager _snapshotManager;
         private Block _lastBlock;
         private PrivateKey _currentSigner;
         private BlockTree _blockTree;
@@ -74,24 +79,26 @@ namespace Nethermind.Clique.Test
             MineBlock(_blockTree, block3);
             MineBlock(_blockTree, block4);           
             MineBlock(_blockTree, block5);
-            IEthereumSigner signer = new EthereumSigner(RinkebySpecProvider.Instance, NullLogManager.Instance);
+            IEthereumEcdsa ecdsa = new EthereumEcdsa(RinkebySpecProvider.Instance, LimboLogs.Instance);
             // Init snapshot db
             IDb db = new MemDb();
-            CliqueConfig config = new CliqueConfig(15, 30000);
+            CliqueConfig config = new CliqueConfig();
             // Select in-turn signer
             int currentBlock = 6;
             int currentSignerIndex = (currentBlock % _signers.Count);
             _currentSigner = _signers[currentSignerIndex];
-            _clique = new CliqueSealEngine(config, signer, _currentSigner, db, _blockTree, NullLogManager.Instance);
+            _snapshotManager = new SnapshotManager(config, db, _blockTree, ecdsa, LimboLogs.Instance);
+            _sealValidator = new CliqueSealValidator(config, _snapshotManager, LimboLogs.Instance);
+            _clique = new CliqueSealer(new BasicWallet(_currentSigner), config, _snapshotManager, _currentSigner.Address, LimboLogs.Instance);
         }
 
         [Test]
-        public void Can_sign_block()
+        public async Task Can_sign_block()
         {
             Block block6 = CreateBlock(2, 6, _lastBlock);
-            Block signed = _clique.Mine(block6);
-            bool validHeader = _clique.ValidateParams(_blockTree.FindBlock(signed.ParentHash, false), signed.Header);
-            bool validSeal = _clique.ValidateSeal(signed.Header);
+            Block signed = await _clique.SealBlock(block6, CancellationToken.None);
+            bool validHeader = _sealValidator.ValidateParams(_blockTree.FindHeader(signed.ParentHash, BlockTreeLookupOptions.None), signed.Header);
+            bool validSeal = _sealValidator.ValidateSeal(signed.Header);
             Assert.True(validHeader);
             Assert.True(validSeal);
         }
@@ -102,14 +109,17 @@ namespace Nethermind.Clique.Test
             Keccak ommersHash = Keccak.OfAnEmptySequenceRlp;
             Address beneficiary = Address.Zero;
             UInt256 difficulty = new UInt256(1);
-            UInt256 number = new UInt256(0);
+            long number = 0L;
             int gasLimit = 4700000;
             UInt256 timestamp = new UInt256(1492009146);
             byte[] extraData = Bytes.FromHexString(GetGenesisExtraData());
             BlockHeader header = new BlockHeader(parentHash, ommersHash, beneficiary, difficulty, number, gasLimit, timestamp, extraData);
-            Block genesis = new Block(header, new BlockHeader[0]);
-            //genesis.Hash = new Keccak("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177");
+            Block genesis = new Block(header, new BlockHeader[0]);            
             genesis.Hash = BlockHeader.CalculateHash(genesis);
+            
+            // this would need to be loaded from rinkeby chainspec to include allocations
+//            Assert.AreEqual(new Keccak("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177"), genesis.Hash);
+            
             genesis.Header.Hash = BlockHeader.CalculateHash(genesis.Header);
             return genesis;
         }
@@ -130,8 +140,7 @@ namespace Nethermind.Clique.Test
         private void MineBlock(BlockTree tree, Block block)
         {
             tree.SuggestBlock(block);
-            tree.MarkAsProcessed(block.Hash);
-            tree.MoveToMain(block);
+            tree.UpdateMainChain(block);
         }
 
         private Block CreateBlock(int blockDifficulty, int blockNumber, Block lastBlock)
@@ -140,7 +149,7 @@ namespace Nethermind.Clique.Test
             Keccak ommersHash = Keccak.OfAnEmptySequenceRlp;
             Address beneficiary = Address.Zero;
             UInt256 difficulty = new UInt256(blockDifficulty);
-            UInt256 number = new UInt256(blockNumber);
+            long number = blockNumber;
             int gasLimit = 4700000;
             UInt256 timestamp = new UInt256(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             byte[] extraData = Bytes.FromHexString("d883010812846765746888676f312e31312e31856c696e75780000000000000028eb026ab5355b45499053382886754f1db544618d45edc979de1864d83a626b77513bd34d7f21059e79e303c3ab210e1424e71bcb8347835cbd378a785a06f800");
@@ -158,7 +167,7 @@ namespace Nethermind.Clique.Test
             BlockHeader header = BuildCliqueBlock();
 
             Address expectedBlockSealer = new Address("0xb279182d99e65703f0076e4812653aab85fca0f0");
-            Address blockSealer = _clique.GetBlockSealer(header);
+            Address blockSealer = _snapshotManager.GetBlockSealer(header);
             Assert.AreEqual(expectedBlockSealer, blockSealer);
         }
 

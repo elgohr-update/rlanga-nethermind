@@ -30,9 +30,15 @@ namespace Nethermind.Abi
 
         public static AbiBool Bool { get; } = AbiBool.Instance;
 
-        public static AbiInt Int { get; } = new AbiInt(256);
+        public static AbiInt Int256 { get; } = new AbiInt(256);
 
-        public static AbiUInt UInt { get; } = new AbiUInt(256);
+        public static AbiUInt UInt256 { get; } = new AbiUInt(256);
+        
+        public static AbiUInt UInt32 { get; } = new AbiUInt(32);
+        
+        public static AbiUInt UInt16 { get; } = new AbiUInt(16);
+        
+        public static AbiUInt UInt96 { get; } = new AbiUInt(96);
 
         public static AbiString String { get; } = AbiString.Instance;
 
@@ -49,9 +55,9 @@ namespace Nethermind.Abi
             return true;
         }
 
-        public abstract (object, int) Decode(byte[] data, int position);
+        public abstract (object, int) Decode(byte[] data, int position, bool packed);
 
-        public abstract byte[] Encode(object arg);
+        public abstract byte[] Encode(object arg, bool packed);
 
         public override string ToString()
         {

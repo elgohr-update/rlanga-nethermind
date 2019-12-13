@@ -29,19 +29,19 @@ namespace Nethermind.Stats
         void AddNodeStatsDisconnectEvent(DisconnectType disconnectType, DisconnectReason disconnectReason);
         void AddNodeStatsP2PInitializedEvent(P2PNodeDetails nodeDetails);
         void AddNodeStatsEth62InitializedEvent(EthNodeDetails nodeDetails);
-        void AddNodeStatsSyncEvent(NodeStatsEventType nodeStatsEventType, SyncNodeDetails syncDetails);
+        void AddNodeStatsSyncEvent(NodeStatsEventType nodeStatsEventType);
 
         bool DidEventHappen(NodeStatsEventType nodeStatsEventType);
 
-        void AddLatencyCaptureEvent(NodeLatencyStatType latencyType, long miliseconds);
+        void AddLatencyCaptureEvent(NodeLatencyStatType latencyType, long milliseconds);
         long? GetAverageLatency(NodeLatencyStatType latencyType);
 
+        (bool Result, NodeStatsEventType? DelayReason) IsConnectionDelayed();
+        
         long CurrentNodeReputation { get; }
         long CurrentPersistedNodeReputation { get; set; }
         long NewPersistedNodeReputation { get; }
-        bool IsTrustedPeer { get; set; }
-        DateTime? LastDisconnectTime { get; set; }
-        DateTime? LastFailedConnectionTime { get; set; }
+        
         P2PNodeDetails P2PNodeDetails { get; }
         EthNodeDetails EthNodeDetails { get; }
         CompatibilityValidationType? FailedCompatibilityValidation { get; set; }

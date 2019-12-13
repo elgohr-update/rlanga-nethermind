@@ -20,9 +20,9 @@ using FluentAssertions;
 using Nethermind.Blockchain.Receipts;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
+using Nethermind.Logging;
 using Nethermind.Store;
 using NUnit.Framework;
 
@@ -32,13 +32,13 @@ namespace Nethermind.Blockchain.Test
     public class ReceiptStorageTests
     {
         private ISpecProvider _specProvider;
-        private IEthereumSigner _ethereumSigner;
+        private IEthereumEcdsa _ethereumEcdsa;
 
         [SetUp]
         public void Setup()
         {
             _specProvider = RopstenSpecProvider.Instance;
-            _ethereumSigner = new EthereumSigner(_specProvider, NullLogManager.Instance);
+            _ethereumEcdsa = new EthereumEcdsa(_specProvider, NullLogManager.Instance);
         }
 
         [Test]
@@ -47,22 +47,37 @@ namespace Nethermind.Blockchain.Test
 
         [Test]
         public void should_add_and_fetch_receipt_from_persistent_storage()
-            => TestAddAndGetReceipt(new PersistentReceiptStorage(new MemDb(), _specProvider));
+            => TestAddAndGetReceipt(new PersistentReceiptStorage(new MemDb(), NullDb.Instance, _specProvider, LimboLogs.Instance));
+        
+        [Test]
+        public void should_add_and_fetch_receipt_from_persistent_storage_with_eip_658()
+            => TestAddAndGetReceiptEip658(new PersistentReceiptStorage(new MemDb(), NullDb.Instance, _specProvider, LimboLogs.Instance));
 
         private void TestAddAndGetReceipt(IReceiptStorage storage)
         {
             var transaction = GetSignedTransaction();
             var receipt = GetReceipt(transaction);
-            storage.Add(receipt);
-            var fetchedReceipt = storage.Get(transaction.Hash);
+            storage.Add(receipt, true);
+            var fetchedReceipt = storage.Find(transaction.Hash);
+            receipt.StatusCode.Should().Be(fetchedReceipt.StatusCode);
+            receipt.PostTransactionState.Should().Be(fetchedReceipt.PostTransactionState);
+        }
+        
+        private void TestAddAndGetReceiptEip658(IReceiptStorage storage)
+        {
+            var transaction = GetSignedTransaction();
+            var receipt = GetReceipt(transaction);
+            storage.Add(receipt, true);
+            var fetchedReceipt = storage.Find(transaction.Hash);
+            receipt.StatusCode.Should().Be(fetchedReceipt.StatusCode);
             receipt.PostTransactionState.Should().Be(fetchedReceipt.PostTransactionState);
         }
 
         private Transaction GetSignedTransaction(Address to = null)
-            => Build.A.Transaction.SignedAndResolved(_ethereumSigner, TestObject.PrivateKeyA, 1).TestObject;
+            => Build.A.Transaction.SignedAndResolved(_ethereumEcdsa, TestItem.PrivateKeyA, 1).TestObject;
 
-        private static TransactionReceipt GetReceipt(Transaction transaction)
-            => Build.A.TransactionReceipt.WithState(TestObject.KeccakB)
+        private static TxReceipt GetReceipt(Transaction transaction)
+            => Build.A.Receipt.WithState(TestItem.KeccakB)
                 .WithTransactionHash(transaction.Hash).TestObject;
     }
 }

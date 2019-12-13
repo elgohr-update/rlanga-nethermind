@@ -16,19 +16,17 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Dirichlet.Numerics;
-
 namespace Nethermind.Blockchain.Filters
 {
     public class FilterBlock
     {
-        public UInt256 BlockId { get; }
+        public long BlockNumber { get; }
         public FilterBlockType Type { get; }
         
-        public FilterBlock(UInt256 blockId)
+        public FilterBlock(long blockNumber)
         {
-            BlockId = blockId;
-            Type = FilterBlockType.BlockId;
+            BlockNumber = blockNumber;
+            Type = FilterBlockType.BlockNumber;
         }
         
         public FilterBlock(FilterBlockType type)

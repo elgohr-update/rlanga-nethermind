@@ -21,22 +21,25 @@ using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Core
 {
-    public class TransactionReceipt
+    public class TxReceipt
     {
         /// <summary>
         ///     EIP-658
         /// </summary>
         public byte StatusCode { get; set; }
 
-        public UInt256 BlockNumber { get; set; }
+        public long BlockNumber { get; set; }
         public Keccak BlockHash { get; set; }
-        public Keccak TransactionHash { get; set; }
+        public Keccak TxHash { get; set; }
         public int Index { get; set; }
         public long GasUsed { get; set; }
         public long GasUsedTotal { get; set; }
         public Address Sender { get; set; }
         public Address ContractAddress { get; set; }
         public Address Recipient { get; set; }
+        
+        [Todo(Improve.Refactor, "Receipt tracer?")]
+        public byte[] ReturnValue { get; set; }
         
         /// <summary>
         ///     Removed in EIP-658

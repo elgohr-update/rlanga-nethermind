@@ -21,17 +21,23 @@ using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Core
 {
-    public class Timestamp : ITimestamp
+    public class Timestamper : ITimestamper
     {
-        private readonly IDateTimeProvider _dateTimeProvider;
+        private readonly DateTime? _constantDate;
 
-        public Timestamp(IDateTimeProvider dateTimeProvider = null)
+        public Timestamper(DateTime? constantDate = null)
         {
-            _dateTimeProvider = dateTimeProvider ?? new DateTimeProvider();
+            _constantDate = constantDate;
         }
-
+        
         public ulong EpochSeconds => (ulong) Offset.ToUnixTimeSeconds();
+        
         public ulong EpochMilliseconds => (ulong) Offset.ToUnixTimeMilliseconds();
-        private DateTimeOffset Offset => new DateTimeOffset(_dateTimeProvider.UtcNow);
+        
+        public DateTime UtcNow => _constantDate ?? DateTime.UtcNow;
+        
+        private DateTimeOffset Offset => new DateTimeOffset(UtcNow);
+        
+        public static Timestamper Default = new Timestamper();
     }
 }

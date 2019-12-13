@@ -16,20 +16,16 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Dirichlet.Numerics;
-
 namespace Nethermind.Core.Specs
 {
     public interface ISpecProvider
     {
-        IReleaseSpec CurrentSpec { get; }
-        
         IReleaseSpec GenesisSpec { get; }
         
-        IReleaseSpec GetSpec(UInt256 blockNumber);
+        IReleaseSpec GetSpec(long blockNumber);
 
-        UInt256? DaoBlockNumber { get; }
-        
+        long? DaoBlockNumber { get; }
+
         int ChainId { get; }
     }
 }

@@ -19,10 +19,11 @@
 using System;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using Nethermind.Core.Logging;
+using Nethermind.Logging;
 
 namespace Nethermind.Core
 {
+    [Todo(Improve.Refactor, "Remove this class and replce with an utility with IDisposable")]
     public class PerfService : IPerfService
     {
         private readonly ILogger _logger;
@@ -37,9 +38,7 @@ namespace Nethermind.Core
         public Guid StartPerfCalc()
         {
             var id = Guid.NewGuid();
-            var stopwatch = new Stopwatch();
-            stopwatch.Start();
-            _stopwatches[id] = stopwatch;
+            _stopwatches[id] = Stopwatch.StartNew();
             return id;
         }
 

@@ -22,11 +22,11 @@ using System.Numerics;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
 using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm.Tracing;
+using Nethermind.Logging;
 using Nethermind.Store;
 using NUnit.Framework;
 
@@ -34,111 +34,176 @@ namespace Nethermind.Evm.Test
 {
     public class VirtualMachineTestsBase
     {
-        private readonly IEthereumSigner _ethereumSigner;
-        private readonly ITransactionProcessor _processor;
-        private readonly ISnapshotableDb _stateDb;
-        protected internal readonly ISpecProvider SpecProvider;
-        protected internal IStateProvider TestState { get; }
-        protected internal IStorageProvider Storage { get; }
+        private IEthereumEcdsa _ethereumEcdsa;
+        private ITransactionProcessor _processor;
+        private ISnapshotableDb _stateDb;
 
-        protected internal static Address Sender { get; } = TestObject.AddressA;
-        protected internal static Address Recipient { get; } = TestObject.AddressB;
+        protected IVirtualMachine Machine { get; private set; }
+        protected IStateProvider TestState { get; private set; }
+        protected IStorageProvider Storage { get; private set; }
 
-        protected virtual UInt256 BlockNumber => MainNetSpecProvider.ByzantiumBlockNumber;
+        protected static Address Contract { get; private set; } = new Address("0xd75a3a95360e44a3874e691fb48d77855f127069");
+        protected static Address Sender { get; private set; } = TestItem.AddressA;
+        protected static Address Recipient { get; private set; } = TestItem.AddressB;
+        protected static Address Miner { get; private set; } = TestItem.AddressD;
 
+        protected virtual long BlockNumber => MainNetSpecProvider.ByzantiumBlockNumber;
+        protected virtual ISpecProvider SpecProvider => MainNetSpecProvider.Instance;
         protected IReleaseSpec Spec => SpecProvider.GetSpec(BlockNumber);
-
-        public VirtualMachineTestsBase()
-        {
-            SpecProvider = MainNetSpecProvider.Instance;
-            ILogManager logger = NullLogManager.Instance;
-            IDb codeDb = new StateDb();
-            _stateDb = new StateDb();
-            StateTree stateTree = new StateTree(_stateDb);
-            TestState = new StateProvider(stateTree, codeDb, logger);
-            Storage = new StorageProvider(_stateDb, TestState, logger);
-            _ethereumSigner = new EthereumSigner(SpecProvider, logger);
-            IBlockhashProvider blockhashProvider = new TestBlockhashProvider();
-            IVirtualMachine virtualMachine = new VirtualMachine(TestState, Storage, blockhashProvider, logger);
-
-            _processor = new TransactionProcessor(SpecProvider, TestState, Storage, virtualMachine, logger);
-        }
 
         [SetUp]
         public virtual void Setup()
         {
-            _stateDbSnapshot = _stateDb.TakeSnapshot();
-            _stateRoot = TestState.StateRoot;
+            ILogManager logger = LimboLogs.Instance;;
+            IDb codeDb = new StateDb();
+            _stateDb = new StateDb();
+            TestState = new StateProvider(_stateDb, codeDb, logger);
+            Storage = new StorageProvider(_stateDb, TestState, logger);
+            _ethereumEcdsa = new EthereumEcdsa(SpecProvider, logger);
+            IBlockhashProvider blockhashProvider = new TestBlockhashProvider();
+            Machine = new VirtualMachine(TestState, Storage, blockhashProvider, SpecProvider, logger);
+            _processor = new TransactionProcessor(SpecProvider, TestState, Storage, Machine, logger);
         }
 
-        private int _stateDbSnapshot;
-        private Keccak _stateRoot;
-
-        [TearDown]
-        public void TearDown()
+        protected GethLikeTxTrace ExecuteAndTrace(params byte[] code)
         {
-            Storage.Reset();
-            TestState.Reset();
-            TestState.StateRoot = _stateRoot;
-
-            _stateDb.Restore(_stateDbSnapshot);
+            GethLikeTxTracer tracer = new GethLikeTxTracer(GethTraceOptions.Default);
+            (var block, var transaction) = PrepareTx(BlockNumber, 100000, code);
+            _processor.Execute(transaction, block.Header, tracer);
+            return tracer.BuildResult();
         }
 
-        protected (TransactionReceipt Receipt, TransactionTrace Trace) ExecuteAndTrace(params byte[] code)
+        protected (ParityLikeTxTrace trace, Block block, Transaction tx) ExecuteInitAndTraceParityCall(params byte[] code)
         {
-            return Execute(BlockNumber, 100000, code, true);
+            (var block, var transaction) = PrepareInitTx(BlockNumber, 100000, code);
+            ParityLikeTxTracer tracer = new ParityLikeTxTracer(block, transaction, ParityTraceTypes.Trace | ParityTraceTypes.StateDiff);
+            _processor.Execute(transaction, block.Header, tracer);
+            return (tracer.BuildResult(), block, transaction);
+        }
+
+        protected (ParityLikeTxTrace trace, Block block, Transaction tx) ExecuteAndTraceParityCall(params byte[] code)
+        {
+            (var block, var transaction) = PrepareTx(BlockNumber, 100000, code);
+            ParityLikeTxTracer tracer = new ParityLikeTxTracer(block, transaction, ParityTraceTypes.Trace | ParityTraceTypes.StateDiff | ParityTraceTypes.VmTrace);
+            _processor.Execute(transaction, block.Header, tracer);
+            return (tracer.BuildResult(), block, transaction);
         }
         
-        protected (TransactionReceipt Receipt, TransactionTrace Trace) ExecuteAndTrace(UInt256 blockNumber, long gasLimit, params byte[] code)
+        protected (ParityLikeTxTrace trace, Block block, Transaction tx) ExecuteAndTraceParityCall(ParityTraceTypes traceTypes, params byte[] code)
         {
-            return Execute(blockNumber, gasLimit, code, true);
-        }
-        
-        protected TransactionReceipt Execute(params byte[] code)
-        {
-            return Execute(BlockNumber, 100000, code, false).Receipt;
+            (var block, var transaction) = PrepareTx(BlockNumber, 100000, code);
+            ParityLikeTxTracer tracer = new ParityLikeTxTracer(block, transaction, traceTypes);
+            _processor.Execute(transaction, block.Header, tracer);
+            return (tracer.BuildResult(), block, transaction);
         }
 
-        protected TransactionReceipt Execute(UInt256 blockNumber, long gasLimit, byte[] code)
+        protected (ParityLikeTxTrace trace, Block block, Transaction tx) ExecuteAndTraceParityCall(byte[] input, UInt256 value, params byte[] code)
         {
-            return Execute(blockNumber, gasLimit, code, false).Receipt;
+            (var block, var transaction) = PrepareTx(BlockNumber, 100000, code, input, value);
+            ParityLikeTxTracer tracer = new ParityLikeTxTracer(block, transaction, ParityTraceTypes.Trace | ParityTraceTypes.StateDiff);
+            _processor.Execute(transaction, block.Header, tracer);
+            return (tracer.BuildResult(), block, transaction);
         }
-        
-        private (TransactionReceipt Receipt, TransactionTrace Trace) Execute(UInt256 blockNumber, long gasLimit, byte[] code, bool shouldTrace)
+
+        protected GethLikeTxTrace ExecuteAndTrace(long blockNumber, long gasLimit, params byte[] code)
+        {
+            GethLikeTxTracer tracer = new GethLikeTxTracer(GethTraceOptions.Default);
+            (var block, var transaction) = PrepareTx(blockNumber, gasLimit, code);
+            _processor.Execute(transaction, block.Header, tracer);
+            return tracer.BuildResult();
+        }
+
+        protected CallOutputTracer Execute(params byte[] code)
+        {
+            (var block, var transaction) = PrepareTx(BlockNumber, 100000, code);
+            CallOutputTracer tracer = new CallOutputTracer();
+            _processor.Execute(transaction, block.Header, tracer);
+            return tracer;
+        }
+
+        protected CallOutputTracer Execute(long blockNumber, long gasLimit, byte[] code)
+        {
+            (var block, var transaction) = PrepareTx(blockNumber, gasLimit, code);
+            CallOutputTracer tracer = new CallOutputTracer();
+            _processor.Execute(transaction, block.Header, tracer);
+            return tracer;
+        }
+
+        private (Block block, Transaction transaction) PrepareTx(long blockNumber, long gasLimit, byte[] code)
         {
             TestState.CreateAccount(Sender, 100.Ether());
             TestState.CreateAccount(Recipient, 100.Ether());
             Keccak codeHash = TestState.UpdateCode(code);
-            TestState.UpdateCodeHash(TestObject.AddressB, codeHash, SpecProvider.GenesisSpec);
+            TestState.UpdateCodeHash(TestItem.AddressB, codeHash, SpecProvider.GenesisSpec);
 
             TestState.Commit(SpecProvider.GenesisSpec);
 
             Transaction transaction = Build.A.Transaction
-                .WithGasLimit((ulong) gasLimit)
+                .WithGasLimit(gasLimit)
                 .WithGasPrice(1)
-                .To(TestObject.AddressB)
-                .SignedAndResolved(_ethereumSigner, TestObject.PrivateKeyA, blockNumber)
+                .To(TestItem.AddressB)
+                .SignedAndResolved(_ethereumEcdsa, TestItem.PrivateKeyA, blockNumber)
                 .TestObject;
 
             Block block = BuildBlock(blockNumber);
-            return _processor.Execute(0, transaction, block.Header, shouldTrace);
+            return (block, transaction);
         }
 
-        protected virtual Block BuildBlock(UInt256 blockNumber)
+        private (Block block, Transaction transaction) PrepareTx(long blockNumber, long gasLimit, byte[] code, byte[] input, UInt256 value)
         {
-            return Build.A.Block.WithNumber(blockNumber).TestObject;
+            TestState.CreateAccount(Sender, 100.Ether());
+            TestState.CreateAccount(Recipient, 100.Ether());
+            Keccak codeHash = TestState.UpdateCode(code);
+            TestState.UpdateCodeHash(TestItem.AddressB, codeHash, SpecProvider.GenesisSpec);
+
+            TestState.Commit(SpecProvider.GenesisSpec);
+
+            Transaction transaction = Build.A.Transaction
+                .WithGasLimit(gasLimit)
+                .WithGasPrice(1)
+                .WithData(input)
+                .WithValue(value)
+                .To(TestItem.AddressB)
+                .SignedAndResolved(_ethereumEcdsa, TestItem.PrivateKeyA, blockNumber)
+                .TestObject;
+
+            Block block = BuildBlock(blockNumber);
+            return (block, transaction);
         }
 
-        protected void AssertGas(TransactionReceipt receipt, long gas)
+        private (Block block, Transaction transaction) PrepareInitTx(long blockNumber, long gasLimit, byte[] code)
         {
-            Assert.AreEqual(gas, receipt.GasUsed, "gas");
+            TestState.CreateAccount(Sender, 100.Ether());
+            TestState.Commit(SpecProvider.GenesisSpec);
+
+            Transaction transaction = Build.A.Transaction
+                .WithTo(null)
+                .WithData(Bytes.Empty)
+                .WithGasLimit(gasLimit)
+                .WithGasPrice(1)
+                .WithInit(code)
+                .SignedAndResolved(_ethereumEcdsa, TestItem.PrivateKeyA, blockNumber)
+                .TestObject;
+
+            Block block = BuildBlock(blockNumber);
+            return (block, transaction);
+        }
+
+        protected virtual Block BuildBlock(long blockNumber)
+        {
+            return Build.A.Block.WithNumber(blockNumber).WithGasLimit(8000000).WithBeneficiary(Miner).TestObject;
+        }
+
+        protected void AssertGas(CallOutputTracer receipt, long gas)
+        {
+            Assert.AreEqual(gas, receipt.GasSpent, "gas");
         }
 
         protected void AssertStorage(UInt256 address, Address value)
         {
             Assert.AreEqual(value.Bytes.PadLeft(32), Storage.Get(new StorageAddress(Recipient, address)).PadLeft(32), "storage");
         }
-        
+
         protected void AssertStorage(UInt256 address, Keccak value)
         {
             Assert.AreEqual(value.Bytes, Storage.Get(new StorageAddress(Recipient, address)).PadLeft(32), "storage");
@@ -149,11 +214,18 @@ namespace Nethermind.Evm.Test
             Assert.AreEqual(value.PadLeft(32), Storage.Get(new StorageAddress(Recipient, address)).PadLeft(32), "storage");
         }
 
-        protected void AssertStorage(UInt256 address, BigInteger value)
+        protected void AssertStorage(UInt256 address, BigInteger expectedValue)
         {
-            Assert.AreEqual(value.ToBigEndianByteArray(), Storage.Get(new StorageAddress(Recipient, address)), "storage");
+            byte[] actualValue = Storage.Get(new StorageAddress(Recipient, address));
+            Assert.AreEqual(expectedValue.ToBigEndianByteArray(), actualValue, "storage");
         }
         
+        protected void AssertStorage(StorageAddress storageAddress, BigInteger expectedValue)
+        {
+            byte[] actualValue = Storage.Get(storageAddress);
+            Assert.AreEqual(expectedValue.ToBigEndianByteArray(), actualValue, $"storage {storageAddress}");
+        }
+
         protected void AssertCodeHash(Address address, Keccak codeHash)
         {
             Assert.AreEqual(codeHash, TestState.GetCodeHash(address), "code hash");
@@ -180,7 +252,7 @@ namespace Nethermind.Evm.Test
                 Op(Instruction.CREATE);
                 return this;
             }
-            
+
             public Prepare Create2(byte[] code, byte[] salt, BigInteger value)
             {
                 StoreDataInMemory(0, code);
@@ -191,14 +263,14 @@ namespace Nethermind.Evm.Test
                 Op(Instruction.CREATE2);
                 return this;
             }
-            
+
             public Prepare ForInitOf(byte[] codeToBeDeployed)
             {
                 StoreDataInMemory(0, codeToBeDeployed.PadRight(32));
                 PushData(codeToBeDeployed.Length);
                 PushData(0);
                 Op(Instruction.RETURN);
-                
+
                 return this;
             }
 
@@ -212,6 +284,75 @@ namespace Nethermind.Evm.Test
                 PushData(address);
                 PushData(gasLimit);
                 Op(Instruction.CALL);
+                return this;
+            }
+            
+            public Prepare CallWithInput(Address address, long gasLimit, string input)
+            {
+                return CallWithInput(address, gasLimit, Bytes.FromHexString(input));
+            }
+            
+            public Prepare CallWithInput(Address address, long gasLimit, byte[] input)
+            {
+                StoreDataInMemory(0, input);
+                PushData(0);
+                PushData(0);
+                PushData(input.Length);
+                PushData(0);
+                PushData(0);
+                PushData(address);
+                PushData(gasLimit);
+                Op(Instruction.CALL);
+                return this;
+            }
+            
+            public Prepare CallWithValue(Address address, long gasLimit, UInt256 value)
+            {
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(value);
+                PushData(address);
+                PushData(gasLimit);
+                Op(Instruction.CALL);
+                return this;
+            }
+            
+            public Prepare DelegateCall(Address address, long gasLimit)
+            {
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(address);
+                PushData(gasLimit);
+                Op(Instruction.DELEGATECALL);
+                return this;
+            }
+            
+            public Prepare CallCode(Address address, long gasLimit)
+            {
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(address);
+                PushData(gasLimit);
+                Op(Instruction.CALLCODE);
+                return this;
+            }
+
+            public Prepare StaticCall(Address address, long gasLimit)
+            {                
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(0);
+                PushData(address);
+                PushData(gasLimit);
+                Op(Instruction.STATICCALL);
                 return this;
             }
 
@@ -263,21 +404,34 @@ namespace Nethermind.Evm.Test
                 _byteCode.Add(data);
                 return this;
             }
-            
-            public Prepare StoreDataInMemory(int poisition, byte[] data)
+
+            public Prepare PersistData(string key, string value)
             {
-                if (poisition % 32 != 0)
+                PushData(value);
+                PushData(key);
+                Op(Instruction.SSTORE);
+                return this;
+            }
+
+            public Prepare StoreDataInMemory(int position, string hexString)
+            {
+                return StoreDataInMemory(position, Bytes.FromHexString(hexString));
+            }
+
+            public Prepare StoreDataInMemory(int position, byte[] data)
+            {
+                if (position % 32 != 0)
                 {
                     throw new NotSupportedException();
                 }
-                
+
                 for (int i = 0; i < data.Length; i += 32)
                 {
                     PushData(data.Slice(i, data.Length - i).PadRight(32));
-                    PushData(i);
-                    Op(Instruction.MSTORE);    
+                    PushData(position + i);
+                    Op(Instruction.MSTORE);
                 }
-                
+
                 return this;
             }
         }

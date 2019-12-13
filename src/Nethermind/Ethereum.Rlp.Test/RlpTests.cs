@@ -30,6 +30,7 @@ using NUnit.Framework;
 
 namespace Ethereum.Rlp.Test
 {
+    [Parallelizable(ParallelScope.All)]
     [TestFixture]
     public class RlpTests
     {
@@ -177,7 +178,7 @@ namespace Ethereum.Rlp.Test
             for (int i = 0; i < iterations; i++)
             {
                 block = Nethermind.Core.Encoding.Rlp.Decode<Block>(new Nethermind.Core.Encoding.Rlp(bytes));
-                perfBlock = Nethermind.Core.Encoding.Rlp.Decode<Block>(bytes?.AsRlpContext());
+                perfBlock = Nethermind.Core.Encoding.Rlp.Decode<Block>(bytes?.AsRlpStream());
             }
             
             Stopwatch stopwatch = new Stopwatch();
@@ -193,7 +194,7 @@ namespace Ethereum.Rlp.Test
             stopwatch.Restart();
             for (int i = 0; i < iterations; i++)
             {
-                perfBlock = Nethermind.Core.Encoding.Rlp.Decode<Block>(bytes?.AsRlpContext());
+                perfBlock = Nethermind.Core.Encoding.Rlp.Decode<Block>(bytes?.AsRlpStream());
             }
 
             stopwatch.Stop();

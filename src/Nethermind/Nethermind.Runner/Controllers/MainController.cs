@@ -16,81 +16,68 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using Nethermind.Core;
-using Nethermind.Core.Logging;
 using Nethermind.JsonRpc;
-using Nethermind.JsonRpc.DataModel;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 namespace Nethermind.Runner.Controllers
 {
-    [Route("")]
+    [Route("{*url}")]
     [ApiController]
     public class MainController : ControllerBase
     {
-        private readonly ILogger _logger;
-        private readonly IJsonRpcService _jsonRpcService;
-        private readonly IJsonSerializer _jsonSerializer;
+        private readonly IJsonRpcProcessor _jsonRpcProcessor;
+        private static JsonSerializer _serializer;
+        private static readonly object LockObject = new object();
 
-        public MainController(ILogManager logManager, IJsonRpcService jsonRpcService, IJsonSerializer jsonSerializer)
+        public MainController(IJsonRpcProcessor jsonRpcProcessor, IJsonRpcService jsonRpcService)
         {
-            _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
-            _jsonRpcService = jsonRpcService ?? throw new ArgumentNullException(nameof(jsonRpcService));
-            _jsonSerializer = jsonSerializer ?? throw new ArgumentNullException(nameof(jsonSerializer));
+            _jsonRpcProcessor = jsonRpcProcessor;
+
+            if (_serializer == null)
+            {
+                lock (LockObject)
+                {
+                    if (_serializer == null)
+                    {
+                        var jsonSettings = new JsonSerializerSettings
+                        {
+                            ContractResolver = new CamelCasePropertyNamesContractResolver()
+                        };
+
+                        foreach (var converter in jsonRpcService.Converters)
+                        {
+                            jsonSettings.Converters.Add(converter);
+                        }
+
+                        _serializer = JsonSerializer.Create(jsonSettings);
+                    }
+                }
+            }
         }
 
         [HttpGet]
-        public ActionResult<string> Get()
-        {
-            return "Test successfull";
-        }
+        public ActionResult<string> Get() => "Nethermind JSON RPC";
 
         [HttpPost]
-        public async Task<JsonResult> Post()
+        public async Task Post()
         {
-            using (var reader = new StreamReader(Request.Body, Encoding.UTF8))
+            using var reader = new StreamReader(Request.Body, Encoding.UTF8);
+            var request = await reader.ReadToEndAsync();
+            var result = await _jsonRpcProcessor.ProcessAsync(request);
+            await using var streamWriter = new StreamWriter(Response.Body);
+            using var jsonTextWriter = new JsonTextWriter(streamWriter);
+            if (result.IsCollection)
             {
-                var body = await reader.ReadToEndAsync();
-                if(_logger.IsTrace) _logger.Trace($"Received request: {body}");
-
-
-                (JsonRpcRequest Model, IEnumerable<JsonRpcRequest> Collection) rpcRequest;
-                try
-                {
-                    rpcRequest = _jsonSerializer.DeserializeObjectOrArray<JsonRpcRequest>(body);
-                }
-                catch (Exception ex)
-                {
-                    if(_logger.IsError) _logger.Error($"Error during parsing/validation, request: {body}", ex);
-                    var response = _jsonRpcService.GetErrorResponse(ErrorType.ParseError, "Incorrect message");
-                    return new JsonResult(response);
-                }
-
-                if (rpcRequest.Model != null)
-                {
-                    return new JsonResult(_jsonRpcService.SendRequest(rpcRequest.Model));
-                }
-
-                if (rpcRequest.Collection != null)
-                {
-                    List<JsonRpcResponse> responses = new List<JsonRpcResponse>();
-                    foreach (JsonRpcRequest jsonRpcRequest in rpcRequest.Collection)
-                    {
-                        responses.Add(_jsonRpcService.SendRequest(jsonRpcRequest));
-                    }
-
-                    return new JsonResult(responses);
-                }
-
-                {
-                    var response = _jsonRpcService.GetErrorResponse(ErrorType.InvalidRequest, "Incorrect request");
-                    return new JsonResult(response);    
-                }
+                _serializer.Serialize(jsonTextWriter, result.Responses);
+            }
+            else
+            {
+                _serializer.Serialize(jsonTextWriter, result.Responses[0]);
             }
         }
     }

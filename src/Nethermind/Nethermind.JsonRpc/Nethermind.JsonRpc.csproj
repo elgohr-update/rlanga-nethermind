@@ -1,9 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFramework>netcoreapp3.0</TargetFramework>
+    <LangVersion>8.0</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="11.0.2" />
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.2" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Nethermind.Blockchain\Nethermind.Blockchain.csproj">
@@ -19,11 +20,9 @@
       <Project>{E992EFB5-85F0-49B1-9C0B-6D3846A813A5}</Project>
       <Name>Nethermind.Evm</Name>
     </ProjectReference>
-    <ProjectReference Include="..\Nethermind.KeyStore\Nethermind.KeyStore.csproj">
-      <Project>{31AFB372-BE97-4804-B2B9-AD4C515924B6}</Project>
-      <Name>Nethermind.KeyStore</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\Nethermind.Solc\Nethermind.Solc.csproj" />
+    <ProjectReference Include="..\Nethermind.Facade\Nethermind.Facade.csproj" />
+    <ProjectReference Include="..\Nethermind.Network\Nethermind.Network.csproj" />
+    <ProjectReference Include="..\Nethermind.PubSub\Nethermind.PubSub.csproj" />
     <ProjectReference Include="..\Nethermind.Wallet\Nethermind.Wallet.csproj" />
   </ItemGroup>
 </Project>

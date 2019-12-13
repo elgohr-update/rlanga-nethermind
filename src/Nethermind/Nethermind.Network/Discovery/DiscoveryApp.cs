@@ -28,16 +28,12 @@ using DotNetty.Handlers.Logging;
 using DotNetty.Transport.Bootstrapping;
 using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
-using Nethermind.Config;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
-using Nethermind.Core.Model;
+using Nethermind.Logging;
 using Nethermind.Network.Config;
 using Nethermind.Network.Discovery.Lifecycle;
 using Nethermind.Network.Discovery.RoutingTable;
-using Nethermind.Stats;
 using Nethermind.Stats.Model;
 using Timer = System.Timers.Timer;
 
@@ -45,20 +41,20 @@ namespace Nethermind.Network.Discovery
 {
     public class DiscoveryApp : IDiscoveryApp
     {
-        private readonly INetworkConfig _configurationProvider;
+        private readonly IDiscoveryConfig _discoveryConfig;
+        private readonly ITimestamper _timestamper;
         private readonly INodesLocator _nodesLocator;
         private readonly IDiscoveryManager _discoveryManager;
-        private readonly INodeFactory _nodeFactory;
         private readonly INodeTable _nodeTable;
         private readonly ILogManager _logManager;
         private readonly ILogger _logger;
         private readonly IMessageSerializationService _messageSerializationService;
         private readonly ICryptoRandom _cryptoRandom;
         private readonly INetworkStorage _discoveryStorage;
+        private readonly INetworkConfig _networkConfig;
         private readonly IPerfService _perfService;
 
         private Timer _discoveryTimer;
-        //private Timer _refreshTimer;
         private Timer _discoveryPersistenceTimer;
 
         private IChannel _channel;
@@ -69,25 +65,28 @@ namespace Nethermind.Network.Discovery
         public DiscoveryApp(
             INodesLocator nodesLocator,
             IDiscoveryManager discoveryManager,
-            INodeFactory nodeFactory,
             INodeTable nodeTable,
             IMessageSerializationService messageSerializationService,
             ICryptoRandom cryptoRandom,
             INetworkStorage discoveryStorage,
-            IConfigProvider configurationProvider,
-            ILogManager logManager, IPerfService perfService)
+            INetworkConfig networkConfig,
+            IDiscoveryConfig discoveryConfig,
+            ITimestamper timestamper,
+            ILogManager logManager,
+            IPerfService perfService)
         {
-            _logManager = logManager;
-            _perfService = perfService;
+            _logManager = logManager ?? throw new ArgumentNullException(nameof(logManager));
             _logger = _logManager.GetClassLogger();
-            _configurationProvider = configurationProvider.GetConfig<INetworkConfig>();
-            _nodesLocator = nodesLocator;
-            _discoveryManager = discoveryManager;
-            _nodeFactory = nodeFactory;
-            _nodeTable = nodeTable;
-            _messageSerializationService = messageSerializationService;
-            _cryptoRandom = cryptoRandom;
-            _discoveryStorage = discoveryStorage;
+            _perfService = perfService ?? throw new ArgumentNullException(nameof(perfService));
+            _discoveryConfig = discoveryConfig ?? throw new ArgumentNullException(nameof(discoveryConfig));
+            _timestamper = timestamper ?? throw new ArgumentNullException(nameof(timestamper));
+            _nodesLocator = nodesLocator ?? throw new ArgumentNullException(nameof(nodesLocator));
+            _discoveryManager = discoveryManager ?? throw new ArgumentNullException(nameof(discoveryManager));
+            _nodeTable = nodeTable ?? throw new ArgumentNullException(nameof(nodeTable));
+            _messageSerializationService = messageSerializationService ?? throw new ArgumentNullException(nameof(messageSerializationService));
+            _cryptoRandom = cryptoRandom ?? throw new ArgumentNullException(nameof(cryptoRandom));
+            _discoveryStorage = discoveryStorage ?? throw new ArgumentNullException(nameof(discoveryStorage));
+            _networkConfig = networkConfig ?? throw new ArgumentNullException(nameof(networkConfig));
             _discoveryStorage.StartBatch();
         }
 
@@ -96,7 +95,7 @@ namespace Nethermind.Network.Discovery
         public void Initialize(PublicKey masterPublicKey)
         {
             _discoveryManager.NodeDiscovered += OnNewNodeDiscovered;
-            _nodeTable.Initialize(new NodeId(masterPublicKey));
+            _nodeTable.Initialize(masterPublicKey);
             _nodesLocator.Initialize(_nodeTable.MasterNode);
         }
 
@@ -144,7 +143,7 @@ namespace Nethermind.Network.Discovery
 
         private void InitializeUdpChannel()
         {
-            if(_logger.IsInfo) _logger.Info($"Starting Discovery UDP Channel: {_configurationProvider.MasterHost}:{_configurationProvider.MasterPort}");
+            if(_logger.IsInfo) _logger.Info($"Discovery    : udp://{_networkConfig.ExternalIp}:{_networkConfig.DiscoveryPort}");
             _group = new MultithreadEventLoopGroup(1);
             var bootstrap = new Bootstrap();
             bootstrap
@@ -163,7 +162,7 @@ namespace Nethermind.Network.Discovery
                     .Handler(new ActionChannelInitializer<IDatagramChannel>(InitializeChannel));
             }
 
-            _bindingTask = bootstrap.BindAsync(IPAddress.Parse(_configurationProvider.MasterHost), _configurationProvider.MasterPort)
+            _bindingTask = bootstrap.BindAsync(IPAddress.Parse(_networkConfig.LocalIp), _networkConfig.DiscoveryPort)
                 .ContinueWith(t => _channel = t.Result);
         }
 
@@ -171,7 +170,7 @@ namespace Nethermind.Network.Discovery
 
         private void InitializeChannel(IDatagramChannel channel)
         {
-            _discoveryHandler = new NettyDiscoveryHandler(_discoveryManager, channel, _messageSerializationService, _logManager);
+            _discoveryHandler = new NettyDiscoveryHandler(_discoveryManager, channel, _messageSerializationService, _timestamper, _logManager);
             _discoveryManager.MessageSender = _discoveryHandler;
             _discoveryHandler.OnChannelActivated += OnChannelActivated;
             channel.Pipeline
@@ -196,7 +195,7 @@ namespace Nethermind.Network.Discovery
                     
                     if (t.IsCompleted && !_appShutdownSource.IsCancellationRequested)
                     {
-                        _logger.Info("Discovery App initialized.");
+                        _logger.Debug("Discovery App initialized.");
                     }
                 }
             );
@@ -209,7 +208,7 @@ namespace Nethermind.Network.Discovery
                 //Step 1 - read nodes and stats from db
                 AddPersistedNodes(cancellationToken);
 
-                //Step 2 - initialize bootNodes
+                //Step 2 - initialize bootnodes
                 if(_logger.IsDebug) _logger.Debug("Initializing bootnodes.");
                 while (true)
                 {
@@ -224,7 +223,7 @@ namespace Nethermind.Network.Discovery
                     }
 
                     //Check if we were able to communicate with any trusted nodes or persisted nodes
-                    //if so no need to replay bootstraping, we can start discovery process
+                    //if so no need to replay bootstrapping, we can start discovery process
                     if (_discoveryManager.GetOrAddNodeLifecycleManagers(x => x.State == NodeLifecycleState.Active).Any())
                     {
                         break;
@@ -242,7 +241,14 @@ namespace Nethermind.Network.Discovery
                 InitializeDiscoveryPersistenceTimer();
                 InitializeDiscoveryTimer();
 
-                await RunDiscoveryAsync(cancellationToken);
+                await RunDiscoveryAsync(cancellationToken).ContinueWith(
+                    t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            _logger.Error("Discovery error", t.Exception);            
+                        }
+                    });
             }
             catch (Exception e)
             {
@@ -252,7 +258,7 @@ namespace Nethermind.Network.Discovery
 
         private void AddPersistedNodes(CancellationToken cancellationToken)
         {
-            if (!_configurationProvider.IsDiscoveryNodesPersistenceOn)
+            if (!_discoveryConfig.IsDiscoveryNodesPersistenceOn)
             {
                 return;
             }
@@ -265,7 +271,17 @@ namespace Nethermind.Network.Discovery
                     break;
                 }
                 
-                var node = _nodeFactory.CreateNode(networkNode.NodeId, networkNode.Host, networkNode.Port);
+                Node node;
+                try
+                {
+                    node = new Node(networkNode.NodeId, networkNode.Host, networkNode.Port);
+                }
+                catch (Exception)
+                {
+                    if(_logger.IsDebug) _logger.Error($"ERROR/DEBUG peer could not be loaded for {networkNode.NodeId}@{networkNode.Host}:{networkNode.Port}");
+                    continue;
+                }
+                
                 var manager = _discoveryManager.GetNodeLifecycleManager(node, true);
                 if (manager == null)
                 {
@@ -286,12 +302,24 @@ namespace Nethermind.Network.Discovery
         private void InitializeDiscoveryTimer()
         {
             if(_logger.IsDebug) _logger.Debug("Starting discovery timer");
-            _discoveryTimer = new Timer(_configurationProvider.DiscoveryInterval) {AutoReset = false};
+            _discoveryTimer = new Timer(1000) {AutoReset = false};
             _discoveryTimer.Elapsed += (sender, e) =>
             {
-                _discoveryTimer.Enabled = false;
-                RunDiscoveryProcess();
-                _discoveryTimer.Enabled = true;
+                try
+                {
+                    _discoveryTimer.Enabled = false;
+                    RunDiscoveryProcess();
+                    var nodesCountAfterDiscovery = _nodeTable.Buckets.Sum(x => x.Items.Count);
+                    _discoveryTimer.Interval = nodesCountAfterDiscovery < 100 ? 10 : nodesCountAfterDiscovery < 1000 ? 100 : _discoveryConfig.DiscoveryInterval;
+                }
+                catch (Exception exception)
+                {
+                    if (_logger.IsDebug) _logger.Error("Discovery timer failed", exception);
+                }
+                finally
+                {
+                    _discoveryTimer.Enabled = true;
+                }
             };
             _discoveryTimer.Start();
         }
@@ -312,12 +340,22 @@ namespace Nethermind.Network.Discovery
         private void InitializeDiscoveryPersistenceTimer()
         {
             if(_logger.IsDebug) _logger.Debug("Starting discovery persistence timer");
-            _discoveryPersistenceTimer = new Timer(_configurationProvider.DiscoveryPersistenceInterval) {AutoReset = false};
+            _discoveryPersistenceTimer = new Timer(_discoveryConfig.DiscoveryPersistenceInterval) {AutoReset = false};
             _discoveryPersistenceTimer.Elapsed += (sender, e) =>
             {
-                _discoveryPersistenceTimer.Enabled = false;
-                RunDiscoveryCommit();
-                _discoveryPersistenceTimer.Enabled = true;
+                try
+                {
+                    _discoveryPersistenceTimer.Enabled = false;
+                    RunDiscoveryCommit();
+                }
+                catch (Exception exception)
+                {
+                    if (_logger.IsDebug) _logger.Error("Discovery persistence timer failed", exception);
+                }
+                finally
+                {
+                    _discoveryPersistenceTimer.Enabled = true;
+                }
             };
             _discoveryPersistenceTimer.Start();
         }
@@ -355,9 +393,14 @@ namespace Nethermind.Network.Discovery
                     return;
                 }
                 var closeTask = _channel.CloseAsync();
-                if (await Task.WhenAny(closeTask, Task.Delay(_configurationProvider.UdpChannelCloseTimeout)) != closeTask)
+                CancellationTokenSource delayCancellation = new CancellationTokenSource();
+                if (await Task.WhenAny(closeTask, Task.Delay(_discoveryConfig.UdpChannelCloseTimeout, delayCancellation.Token)) != closeTask)
                 {
-                    _logger.Error($"Could not close udp connection in {_configurationProvider.UdpChannelCloseTimeout} miliseconds");
+                    _logger.Error($"Could not close udp connection in {_discoveryConfig.UdpChannelCloseTimeout} miliseconds");
+                }
+                else
+                {
+                    delayCancellation.Cancel();
                 }
             }
             catch (Exception e)
@@ -368,20 +411,20 @@ namespace Nethermind.Network.Discovery
 
         private async Task<bool> InitializeBootnodes(CancellationToken cancellationToken)
         {
-            var bootNodes = _configurationProvider.BootNodes;
-            if (bootNodes == null || !bootNodes.Any())
+            var bootnodes = NetworkNode.ParseNodes(_discoveryConfig.Bootnodes, _logger);
+            if (!bootnodes.Any())
             {
                 if (_logger.IsWarn) _logger.Warn("No bootnodes specified in configuration");
                 return true;
             }
             
             var managers = new List<INodeLifecycleManager>();
-            for (var i = 0; i < bootNodes.Length; i++)
+            for (var i = 0; i < bootnodes.Length; i++)
             {
-                var bootnode = bootNodes[i];
+                var bootnode = bootnodes[i];
                 var node = bootnode.NodeId == null
-                    ? _nodeFactory.CreateNode(bootnode.Host, bootnode.Port)
-                    : _nodeFactory.CreateNode(new NodeId(new PublicKey(Bytes.FromHexString(bootnode.NodeId))), bootnode.Host, bootnode.Port, true);
+                    ? new Node(bootnode.Host, bootnode.Port)
+                    : new Node(bootnode.NodeId, bootnode.Host, bootnode.Port, true);
                 var manager = _discoveryManager.GetNodeLifecycleManager(node);
                 if (manager != null)
                 {
@@ -394,7 +437,7 @@ namespace Nethermind.Network.Discovery
             }
 
             //Wait for pong message to come back from Boot nodes
-            var maxWaitTime = _configurationProvider.BootNodePongTimeout;
+            var maxWaitTime = _discoveryConfig.BootnodePongTimeout;
             var itemTime = maxWaitTime / 100;
             for (var i = 0; i < 100; i++)
             {
@@ -410,7 +453,7 @@ namespace Nethermind.Network.Discovery
 
                 if (_discoveryManager.GetOrAddNodeLifecycleManagers(x => x.State == NodeLifecycleState.Active).Any())
                 {
-                    if(_logger.IsTrace) _logger.Trace("Couldnt connect to any of the bootnodes, but succsessfully connected to at least one persisted node.");
+                    if(_logger.IsTrace) _logger.Trace("Was not able to connect to any of the bootnodes, but successfully connected to at least one persisted node.");
                     break;
                 }
 
@@ -474,13 +517,14 @@ namespace Nethermind.Network.Discovery
             await _nodesLocator.LocateNodesAsync(randomId, cancellationToken);
         }
 
+        [Todo(Improve.Allocations, "Remove ToArray here - address as a part of the network DB rewrite")]
         private void RunDiscoveryCommit()
         {
             try
             {
                 var managers = _discoveryManager.GetOrAddNodeLifecycleManagers();
                 //we need to update all notes to update reputation
-                _discoveryStorage.UpdateNodes(managers.Select(x => new NetworkNode(x.ManagedNode.Id.PublicKey, x.ManagedNode.Host, x.ManagedNode.Port, x.ManagedNode.Description, x.NodeStats.NewPersistedNodeReputation)).ToArray());
+                _discoveryStorage.UpdateNodes(managers.Select(x => new NetworkNode(x.ManagedNode.Id, x.ManagedNode.Host, x.ManagedNode.Port, x.NodeStats.NewPersistedNodeReputation)).ToArray());
 
                 if (!_discoveryStorage.AnyPendingChange())
                 {
@@ -512,6 +556,7 @@ namespace Nethermind.Network.Discovery
         
         private void OnNewNodeDiscovered(object sender, NodeEventArgs e)
         {
+            e.Node.AddedToDiscovery = true;
             NodeDiscovered?.Invoke(this, e);
         }
     }

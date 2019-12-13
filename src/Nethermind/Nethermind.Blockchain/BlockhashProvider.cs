@@ -16,38 +16,57 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Dirichlet.Numerics;
 using Nethermind.Evm;
+using Nethermind.Logging;
 
 namespace Nethermind.Blockchain
 {
     public class BlockhashProvider : IBlockhashProvider
     {
         private static int _maxDepth = 256;
-        private readonly IBlockTree _chain;
+        private readonly IBlockTree _blockTree;
+        private ILogger _logger;
 
-        public BlockhashProvider(IBlockTree chain)
+        public BlockhashProvider(IBlockTree blockTree, ILogManager logManager)
         {
-            _chain = chain;
+            _blockTree = blockTree ?? throw new ArgumentNullException(nameof(blockTree));
+            _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
         }
 
-        public Keccak GetBlockhash(BlockHeader currentBlock, UInt256 number)
+        public Keccak GetBlockhash(BlockHeader currentBlock, in long number)
         {
-            UInt256 current = currentBlock.Number;
-            if (number >= current || number < current - UInt256.Min(current, (UInt256)_maxDepth))
+            long current = currentBlock.Number;
+            if (number >= current || number < current - Math.Min(current, _maxDepth))
             {
                 return null;
             }
 
-            BlockHeader header = _chain.FindHeader(currentBlock.ParentHash);
+            bool isFastSyncSearch = false;
+
+            BlockHeader header = _blockTree.FindHeader(currentBlock.ParentHash, BlockTreeLookupOptions.TotalDifficultyNotNeeded);
             for (var i = 0; i < _maxDepth; i++)
             {
-                if (number == header.Number) return header.Hash;
+                if (number == header.Number)
+                {
+                    return header.Hash;
+                }
 
-                header = _chain.FindHeader(header.ParentHash);
-                if (_chain.IsMainChain(header.Hash)) header = _chain.FindHeader(number);
+                header = _blockTree.FindHeader(header.ParentHash, BlockTreeLookupOptions.TotalDifficultyNotNeeded);
+                if (_blockTree.IsMainChain(header.Hash) && !isFastSyncSearch)
+                {
+                    try
+                    {
+                        header = _blockTree.FindHeader(number, BlockTreeLookupOptions.TotalDifficultyNotNeeded);
+                    }
+                    catch (InvalidOperationException) // fast sync during the first 256 blocks after the transition
+                    {
+                        isFastSyncSearch = true;
+                    }
+                }
             }
 
             return null;

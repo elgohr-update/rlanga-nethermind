@@ -17,8 +17,8 @@
  */
 
 using Nethermind.Core;
-using Nethermind.Core.Logging;
 using Nethermind.JsonRpc.Client;
+using Nethermind.Logging;
 
 namespace Nethermind.Store.Rpc
 {
@@ -33,16 +33,24 @@ namespace Nethermind.Store.Rpc
             CodeDb = new StateDb(new ReadOnlyDb(new RpcDb(DbNames.Code, serializer, client, logManager, recordDbProvider?.CodeDb), true));
             ReceiptsDb = new ReadOnlyDb(new RpcDb(DbNames.Receipts, serializer, client, logManager, recordDbProvider?.ReceiptsDb), true);
             BlocksDb = new ReadOnlyDb(new RpcDb(DbNames.Blocks, serializer, client, logManager, recordDbProvider?.BlocksDb), true);
+            HeadersDb = new ReadOnlyDb(new RpcDb(DbNames.Headers, serializer, client, logManager, recordDbProvider?.HeadersDb), true);
             BlockInfosDb = new ReadOnlyDb(new RpcDb(DbNames.BlockInfos, serializer, client, logManager, recordDbProvider?.BlockInfosDb), true);
             PendingTxsDb = new ReadOnlyDb(new RpcDb(DbNames.PendingTxs, serializer, client, logManager, recordDbProvider?.ReceiptsDb), true);
+            TraceDb = new ReadOnlyDb(new RpcDb(DbNames.Trace, serializer, client, logManager, recordDbProvider?.ReceiptsDb), true);
+            ConfigsDb = new ReadOnlyDb(new RpcDb(DbNames.Configs, serializer, client, logManager, recordDbProvider?.ConfigsDb), true);
+            EthRequestsDb = new ReadOnlyDb(new RpcDb(DbNames.EthRequests, serializer, client, logManager, recordDbProvider?.EthRequestsDb), true); 
         }
         
         public ISnapshotableDb StateDb { get; }
         public ISnapshotableDb CodeDb { get; }        
         public IDb ReceiptsDb { get; }
         public IDb BlocksDb { get; }
+        public IDb HeadersDb { get; }
         public IDb BlockInfosDb { get; }
         public IDb PendingTxsDb { get; }
+        public IDb TraceDb { get; }
+        public IDb ConfigsDb { get; }
+        public IDb EthRequestsDb { get; }
 
         public void Dispose()
         {
@@ -50,8 +58,11 @@ namespace Nethermind.Store.Rpc
             CodeDb?.Dispose();
             ReceiptsDb?.Dispose();
             BlocksDb?.Dispose();
+            HeadersDb?.Dispose();
             BlockInfosDb?.Dispose();
             PendingTxsDb?.Dispose();
+            ConfigsDb?.Dispose();
+            EthRequestsDb?.Dispose();
             _recordDbProvider?.Dispose();
         }
     }

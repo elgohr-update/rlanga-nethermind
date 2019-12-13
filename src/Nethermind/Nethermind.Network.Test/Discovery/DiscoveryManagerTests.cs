@@ -19,12 +19,11 @@
 using System.Linq;
 using System.Net;
 using System.Threading;
-using Nethermind.Config;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Test.Builders;
-using Nethermind.KeyStore;
+using Nethermind.Db;
+using Nethermind.Logging;
 using Nethermind.Network.Config;
 using Nethermind.Network.Discovery;
 using Nethermind.Network.Discovery.Lifecycle;
@@ -32,6 +31,7 @@ using Nethermind.Network.Discovery.Messages;
 using Nethermind.Network.Discovery.RoutingTable;
 using Nethermind.Stats;
 using Nethermind.Stats.Model;
+using Nethermind.Store;
 using NSubstitute;
 using NUnit.Framework;
 
@@ -42,11 +42,11 @@ namespace Nethermind.Network.Test.Discovery
     {
         private const string TestPrivateKeyHex = "0x3a1076bf45ab87712ad64ccb3b10217737f7faacbf2872e88fdd9a537d8fe266";
         
+        private INetworkConfig _networkConfig = new NetworkConfig();
         private IDiscoveryManager _discoveryManager;
         private IMessageSender _messageSender;
         private INodeTable _nodeTable;
-        private INodeFactory _nodeFactory;
-        private ITimestamp _timestamp;
+        private ITimestamper _timestamper;
         private int _port = 1;
         private string _host = "192.168.1.17";
         private Node[] _nodes;
@@ -55,31 +55,34 @@ namespace Nethermind.Network.Test.Discovery
         [SetUp]
         public void Initialize()
         {
+            NetworkNodeDecoder.Init();
             var privateKey = new PrivateKey(TestPrivateKeyHex);
             _publicKey = privateKey.PublicKey;
             var logManager = NullLogManager.Instance;
-            //var config = new NetworkConfigurationProvider(new NetworkHelper(logger)) { PongTimeout = 100 };
-            var config = new JsonConfigProvider();
-            var networkConfig =config.GetConfig<INetworkConfig>(); 
-            networkConfig.PongTimeout = 100;
 
-            var statsConfig = config.GetConfig<IStatsConfig>();
+            IDiscoveryConfig discoveryConfig = new DiscoveryConfig();
+            discoveryConfig.PongTimeout = 100;
+            
+            IStatsConfig statsConfig = new StatsConfig();
 
             _messageSender = Substitute.For<IMessageSender>();
-            _nodeFactory = new NodeFactory();
-            var calculator = new NodeDistanceCalculator(config);
-
-            _nodeTable = new NodeTable(_nodeFactory, new FileKeyStore(config, new JsonSerializer(logManager), new AesEncrypter(config, logManager), new CryptoRandom(), logManager), calculator, config, logManager);
-            _nodeTable.Initialize();
+            var calculator = new NodeDistanceCalculator(discoveryConfig);
             
-            _timestamp = new Timestamp();
+            _networkConfig.ExternalIp = "99.10.10.66";
+            _networkConfig.LocalIp = "10.0.0.5";
+            
+            _nodeTable = new NodeTable(calculator, discoveryConfig, _networkConfig, logManager);
+            _nodeTable.Initialize(TestItem.PublicKeyA);
+            
+            _timestamper = new Timestamper();
 
             var evictionManager = new EvictionManager(_nodeTable, logManager);
-            var lifecycleFactory = new NodeLifecycleManagerFactory(_nodeFactory, _nodeTable, new DiscoveryMessageFactory(config, _timestamp), evictionManager, new NodeStatsProvider(statsConfig, _nodeFactory, logManager), config, logManager);
+            var lifecycleFactory = new NodeLifecycleManagerFactory(_nodeTable, new DiscoveryMessageFactory(_timestamper), evictionManager, new NodeStatsManager(statsConfig, logManager), discoveryConfig, logManager);
 
-            _nodes = new[] { _nodeFactory.CreateNode("192.168.1.18", 1), _nodeFactory.CreateNode("192.168.1.19", 2) };
+            _nodes = new[] { new Node("192.168.1.18", 1), new Node("192.168.1.19", 2) };
 
-            _discoveryManager = new DiscoveryManager(lifecycleFactory, _nodeFactory, _nodeTable, new NetworkStorage("test", networkConfig, logManager, new PerfService(logManager)), config, logManager);
+            IFullDb nodeDb = new SimpleFilePublicKeyDb("Test","test_db", logManager);
+            _discoveryManager = new DiscoveryManager(lifecycleFactory, _nodeTable, new NetworkStorage(nodeDb, logManager), discoveryConfig, logManager);
             _discoveryManager.MessageSender = _messageSender;
         }
 

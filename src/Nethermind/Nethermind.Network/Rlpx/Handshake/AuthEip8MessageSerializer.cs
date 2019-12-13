@@ -16,7 +16,6 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using System.Diagnostics;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
@@ -46,18 +45,15 @@ namespace Nethermind.Network.Rlpx.Handshake
 
         public AuthEip8Message Deserialize(byte[] data)
         {
-            // TODO: support rlp without checking length?
-            // TODO: this would not be compatible with future versions... ? if the length of prefixes changes
-            Rlp.DecoderContext context = data.AsRlpContext();
+            RlpStream rlpStream = data.AsRlpStream();
             AuthEip8Message authMessage = new AuthEip8Message();
-            context.ReadSequenceLength();
-            byte[] sigAllbytes = context.DecodeByteArray();
-            Signature signature = new Signature(sigAllbytes.Slice(0, 64), sigAllbytes[64]); // since Signature class is Ethereum style it expects V as the 64th byte, hence we use RecoveryID constructor
+            rlpStream.ReadSequenceLength();
+            byte[] sigAllBytes = rlpStream.DecodeByteArray();
+            Signature signature = new Signature(sigAllBytes.Slice(0, 64), sigAllBytes[64]); // since Signature class is Ethereum style it expects V as the 64th byte, hence we use RecoveryID constructor
             authMessage.Signature = signature;
-            authMessage.PublicKey = new PublicKey(context.DecodeByteArray());
-            authMessage.Nonce = context.DecodeByteArray();
-            int version = context.DecodeInt();
-            Debug.Assert(version >= 4, $"Expected {nameof(AuthEip8Message.Version)} to be greater than 4");
+            authMessage.PublicKey = new PublicKey(rlpStream.DecodeByteArray());
+            authMessage.Nonce = rlpStream.DecodeByteArray();
+            int version = rlpStream.DecodeInt();
             return authMessage;
         }
     }

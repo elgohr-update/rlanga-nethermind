@@ -24,9 +24,9 @@ using System.Threading.Tasks;
 using Nethermind.Blockchain.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Dirichlet.Numerics;
-using Nethermind.Evm;
+using Nethermind.Evm.Tracing;
+using Nethermind.Logging;
 
 namespace Nethermind.Blockchain
 {
@@ -35,6 +35,7 @@ namespace Nethermind.Blockchain
         private readonly IBlockProcessor _blockProcessor;
         private readonly IBlockDataRecoveryStep _recoveryStep;
         private readonly bool _storeReceiptsByDefault;
+        private readonly bool _storeTracesByDefault;
         private readonly IBlockTree _blockTree;
         private readonly ILogger _logger;
 
@@ -47,7 +48,7 @@ namespace Nethermind.Blockchain
         private Task _processorTask;
 
         private int _currentRecoveryQueueSize;
-        private const int SoftMaxRecoveryQueueSizeInTx = 10000; // adjust based on tx or gas
+        public int SoftMaxRecoveryQueueSizeInTx = 10000; // adjust based on tx or gas
         private const int MaxProcessingQueueSize = 2000; // adjust based on tx or gas
 
         [Todo(Improve.Refactor, "Store receipts by default should be configurable")]
@@ -56,13 +57,15 @@ namespace Nethermind.Blockchain
             IBlockProcessor blockProcessor,
             IBlockDataRecoveryStep recoveryStep,
             ILogManager logManager,
-            bool storeReceiptsByDefault)
+            bool storeReceiptsByDefault,
+            bool storeTracesByDefault)
         {
             _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
             _blockTree = blockTree ?? throw new ArgumentNullException(nameof(blockTree));
             _blockProcessor = blockProcessor ?? throw new ArgumentNullException(nameof(blockProcessor));
             _recoveryStep = recoveryStep ?? throw new ArgumentNullException(nameof(recoveryStep));
             _storeReceiptsByDefault = storeReceiptsByDefault;
+            _storeTracesByDefault = storeTracesByDefault;
 
             _blockTree.NewBestSuggestedBlock += OnNewBestBlock;
             _stats = new ProcessingStats(_logger);
@@ -70,37 +73,40 @@ namespace Nethermind.Blockchain
 
         private void OnNewBestBlock(object sender, BlockEventArgs blockEventArgs)
         {
-            SuggestBlock(blockEventArgs.Block, _storeReceiptsByDefault ? ProcessingOptions.StoreReceipts : ProcessingOptions.None);
-        }
-
-        public void SuggestBlock(UInt256 blockNumber, ProcessingOptions processingOptions)
-        {
-            if ((processingOptions & ProcessingOptions.ReadOnlyChain) == 0 ||
-                (processingOptions & ProcessingOptions.ForceProcessing) == 0)
+            ProcessingOptions options = ProcessingOptions.None;
+            if (_storeReceiptsByDefault)
             {
-                throw new InvalidOperationException("Probably not what you meant as when processing old blocks you should not modify the chain and you need to enforce processing");
+                options |= ProcessingOptions.StoreReceipts;
             }
 
-            Block block = _blockTree.FindBlock(blockNumber);
-            SuggestBlock(block, processingOptions);
-        }
+            if (_storeTracesByDefault)
+            {
+                options |= ProcessingOptions.StoreTraces;
+            }
 
-        public void SuggestBlock(Keccak blockHash, ProcessingOptions processingOptions)
-        {
-            Block block = _blockTree.FindBlock(blockHash, false);
-            SuggestBlock(block, processingOptions);
+            SuggestBlock(blockEventArgs.Block, options);
         }
 
         public void SuggestBlock(Block block, ProcessingOptions processingOptions)
         {
             if (_logger.IsTrace) _logger.Trace($"Enqueuing a new block {block.ToString(Block.Format.Short)} for processing.");
 
-            _currentRecoveryQueueSize += block.Transactions.Length;
-            BlockRef blockRef = _currentRecoveryQueueSize >= SoftMaxRecoveryQueueSizeInTx ? new BlockRef(block.Hash, processingOptions) : new BlockRef(block, processingOptions);
+            int currentRecoveryQueueSize = Interlocked.Add(ref _currentRecoveryQueueSize, block.Transactions.Length);
+            BlockRef blockRef = currentRecoveryQueueSize >= SoftMaxRecoveryQueueSizeInTx ? new BlockRef(block.Hash, processingOptions) : new BlockRef(block, processingOptions);
             if (!_recoveryQueue.IsAddingCompleted)
             {
-                _recoveryQueue.Add(blockRef);
-                if (_logger.IsTrace) _logger.Trace($"A new block {block.ToString(Block.Format.Short)} enqueued for processing.");
+                try
+                {
+                    _recoveryQueue.Add(blockRef);
+                    if (_logger.IsTrace) _logger.Trace($"A new block {block.ToString(Block.Format.Short)} enqueued for processing.");
+                }
+                catch (InvalidOperationException)
+                {
+                    if (!_recoveryQueue.IsAddingCompleted)
+                    {
+                        throw;
+                    }
+                }
             }
         }
 
@@ -172,9 +178,14 @@ namespace Nethermind.Blockchain
             if (_logger.IsDebug) _logger.Debug($"Starting recovery loop - {_blockQueue.Count} blocks waiting in the queue.");
             foreach (BlockRef blockRef in _recoveryQueue.GetConsumingEnumerable(_loopCancellationSource.Token))
             {
-                ResolveBlockRef(blockRef);
-                _currentRecoveryQueueSize -= blockRef.Block.Transactions.Length;
-                if (_logger.IsTrace) _logger.Trace($"Recovering addresses for block {blockRef.BlockHash ?? blockRef.Block.Hash}.");
+                if (!ResolveBlockRef(blockRef))
+                {
+                    if (_logger.IsTrace) _logger.Trace("Block was removed from the DB and cannot be recovered (it belonged to an invalid branch). Skipping.");
+                    continue;
+                }
+
+                Interlocked.Add(ref _currentRecoveryQueueSize, -blockRef.Block.Transactions.Length);
+                if (_logger.IsTrace) _logger.Trace($"Recovering addresses for block {blockRef.BlockHash?.ToString() ?? blockRef.Block.ToString(Block.Format.Short)}.");
                 _recoveryStep.RecoverData(blockRef.Block);
 
                 try
@@ -189,20 +200,22 @@ namespace Nethermind.Blockchain
             }
         }
 
-        private void ResolveBlockRef(BlockRef blockRef)
+        private bool ResolveBlockRef(BlockRef blockRef)
         {
             if (blockRef.IsInDb)
             {
-                Block block = _blockTree.FindBlock(blockRef.BlockHash, false);
+                Block block = _blockTree.FindBlock(blockRef.BlockHash, BlockTreeLookupOptions.None);
                 if (block == null)
                 {
-                    throw new InvalidOperationException($"Cannot resolve block reference for {blockRef.BlockHash}");
+                    return false;
                 }
 
                 blockRef.Block = block;
                 blockRef.BlockHash = null;
                 blockRef.IsInDb = false;
             }
+
+            return true;
         }
 
         private void RunProcessingLoop()
@@ -225,10 +238,23 @@ namespace Nethermind.Blockchain
                 Block block = blockRef.Block;
 
                 if (_logger.IsTrace) _logger.Trace($"Processing block {block.ToString(Block.Format.Short)}).");
-                Process(block, blockRef.ProcessingOptions, NullTraceListener.Instance);
-                if (_logger.IsTrace) _logger.Trace($"Processed block {block.ToString(Block.Format.Full)}");
 
-                _stats.UpdateStats(block, _recoveryQueue.Count, _blockQueue.Count);
+                IBlockTracer tracer = NullBlockTracer.Instance;
+                if ((blockRef.ProcessingOptions & ProcessingOptions.StoreTraces) != 0)
+                {
+                    tracer = new ParityLikeBlockTracer(ParityTraceTypes.Trace | ParityTraceTypes.StateDiff);
+                }
+
+                Block processedBlock = Process(block, blockRef.ProcessingOptions, tracer);
+                if (processedBlock == null)
+                {
+                    if (_logger.IsTrace) _logger.Trace($"Failed / skipped processing {block.ToString(Block.Format.Full)}");
+                }
+                else
+                {
+                    if (_logger.IsTrace) _logger.Trace($"Processed block {block.ToString(Block.Format.Full)}");
+                    _stats.UpdateStats(block, _recoveryQueue.Count, _blockQueue.Count);
+                }
 
                 if (_logger.IsTrace) _logger.Trace($"Now {_blockQueue.Count} blocks waiting in the queue.");
                 if (_blockQueue.Count == 0)
@@ -236,37 +262,63 @@ namespace Nethermind.Blockchain
                     ProcessingQueueEmpty?.Invoke(this, EventArgs.Empty);
                 }
             }
+
+            if (_logger.IsTrace) _logger.Trace($"Returns from processing loop");
         }
 
         public event EventHandler ProcessingQueueEmpty;
 
         [Todo("Introduce priority queue and create a SuggestWithPriority that waits for block execution to return a block, then make this private")]
-        public Block Process(Block suggestedBlock, ProcessingOptions options, ITraceListener traceListener)
+        public Block Process(Block suggestedBlock, ProcessingOptions options, IBlockTracer blockTracer)
         {
-            RunSimpleChecksAheadOfProcessing(suggestedBlock, options);
+            if (!RunSimpleChecksAheadOfProcessing(suggestedBlock, options))
+            {
+                return null;
+            }
 
             UInt256 totalDifficulty = suggestedBlock.TotalDifficulty ?? 0;
             if (_logger.IsTrace) _logger.Trace($"Total difficulty of block {suggestedBlock.ToString(Block.Format.Short)} is {totalDifficulty}");
-            UInt256 totalTransactions = suggestedBlock.TotalTransactions ?? 0;
-            if (_logger.IsTrace) _logger.Trace($"Total transactions of block {suggestedBlock.ToString(Block.Format.Short)} is {totalTransactions}");
 
+            BlockHeader branchingPoint = null;
             Block[] processedBlocks = null;
-            if (totalDifficulty > (_blockTree.Head?.TotalDifficulty ?? 0) || (options & ProcessingOptions.ForceProcessing) != 0)
+            if (_blockTree.Head == null || totalDifficulty > _blockTree.Head.TotalDifficulty || (options & ProcessingOptions.ForceProcessing) != 0)
             {
                 List<Block> blocksToBeAddedToMain = new List<Block>();
                 Block toBeProcessed = suggestedBlock;
                 do
                 {
                     blocksToBeAddedToMain.Add(toBeProcessed);
-                    toBeProcessed = toBeProcessed.Number == 0 ? null : _blockTree.FindParent(toBeProcessed);
-                    // TODO: need to remove the hardcoded head block store at keccak zero as it would be referenced by the genesis... 
-                    if (toBeProcessed == null)
+                    if (_logger.IsTrace) _logger.Trace($"To be processed (of {suggestedBlock.ToString(Block.Format.Short)}) is {toBeProcessed?.ToString(Block.Format.Short)}");
+                    if (toBeProcessed.IsGenesis)
                     {
                         break;
                     }
-                } while (!_blockTree.IsMainChain(toBeProcessed.Hash));
 
-                BlockHeader branchingPoint = toBeProcessed?.Header;
+                    branchingPoint = _blockTree.FindParentHeader(toBeProcessed.Header, BlockTreeLookupOptions.TotalDifficultyNotNeeded);
+                    if (branchingPoint == null)
+                    {
+                        break; //failure here
+                    }
+
+                    bool isFastSyncTransition = _blockTree.Head == _blockTree.Genesis && toBeProcessed.Number > 1; 
+                    if (!isFastSyncTransition)
+                    {
+                        if (_logger.IsTrace) _logger.Trace($"Finding parent of {toBeProcessed.ToString(Block.Format.Short)}");
+                        toBeProcessed = _blockTree.FindParent(toBeProcessed.Header, BlockTreeLookupOptions.None);
+                        if (_logger.IsTrace) _logger.Trace($"Found parent {toBeProcessed?.ToString(Block.Format.Short)}");
+
+                        if (toBeProcessed == null)
+                        {
+                            if (_logger.IsTrace) _logger.Trace($"Treating this as fast sync transition for {suggestedBlock.ToString(Block.Format.Short)}");
+                            break;
+                        }
+                    }
+                    else
+                    {
+                        break;
+                    }
+                } while (!_blockTree.IsMainChain(branchingPoint.Hash));
+
                 if (branchingPoint != null && branchingPoint.Hash != _blockTree.Head?.Hash)
                 {
                     if (_logger.IsTrace) _logger.Trace($"Head block was: {_blockTree.Head?.ToString(BlockHeader.Format.Short)}");
@@ -280,7 +332,7 @@ namespace Nethermind.Blockchain
                 Keccak stateRoot = branchingPoint?.StateRoot;
                 if (_logger.IsTrace) _logger.Trace($"State root lookup: {stateRoot}");
 
-                List<Block> unprocessedBlocksToBeAddedToMain = new List<Block>();
+                List<Block> blocksToProcess = new List<Block>();
                 Block[] blocks;
                 if ((options & ProcessingOptions.ForceProcessing) != 0)
                 {
@@ -292,20 +344,18 @@ namespace Nethermind.Blockchain
                 {
                     foreach (Block block in blocksToBeAddedToMain)
                     {
-                        if (block.Hash != null && _blockTree.WasProcessed(block.Hash))
+                        if (block.Hash != null && _blockTree.WasProcessed(block.Number, block.Hash))
                         {
-                            stateRoot = block.Header.StateRoot;
-                            if (_logger.IsTrace) _logger.Trace($"State root lookup: {stateRoot}");
-                            break;
+                            if (_logger.IsInfo) _logger.Info($"Rerunning block after reorg: {block.ToString(Block.Format.FullHashAndNumber)}");
                         }
-
-                        unprocessedBlocksToBeAddedToMain.Add(block);
+                        
+                        blocksToProcess.Add(block);
                     }
 
-                    blocks = new Block[unprocessedBlocksToBeAddedToMain.Count];
-                    for (int i = 0; i < unprocessedBlocksToBeAddedToMain.Count; i++)
+                    blocks = new Block[blocksToProcess.Count];
+                    for (int i = 0; i < blocksToProcess.Count; i++)
                     {
-                        blocks[blocks.Length - i - 1] = unprocessedBlocksToBeAddedToMain[i];
+                        blocks[blocks.Length - i - 1] = blocksToProcess[i];
                     }
                 }
 
@@ -317,61 +367,67 @@ namespace Nethermind.Blockchain
                     _recoveryStep.RecoverData(blocks[i]);
                 }
 
-                processedBlocks = _blockProcessor.Process(stateRoot, blocks, options, traceListener);
-                if ((options & ProcessingOptions.ReadOnlyChain) == 0)
+                try
                 {
-                    // TODO: lots of unnecessary loading and decoding here, review after adding support for loading headers only
-                    List<BlockHeader> blocksToBeRemovedFromMain = new List<BlockHeader>();
-                    if (_blockTree.Head?.Hash != branchingPoint?.Hash && _blockTree.Head != null)
+                    processedBlocks = _blockProcessor.Process(stateRoot, blocks, options, blockTracer);
+                }
+                catch (InvalidBlockException ex)
+                {
+                    for (int i = 0; i < blocks.Length; i++)
                     {
-                        blocksToBeRemovedFromMain.Add(_blockTree.Head);
-                        BlockHeader teBeRemovedFromMain = _blockTree.FindHeader(_blockTree.Head.ParentHash);
-                        while (teBeRemovedFromMain != null && teBeRemovedFromMain.Hash != branchingPoint?.Hash)
+                        if (blocks[i].Hash == ex.InvalidBlockHash)
                         {
-                            blocksToBeRemovedFromMain.Add(teBeRemovedFromMain);
-                            teBeRemovedFromMain = _blockTree.FindHeader(teBeRemovedFromMain.ParentHash);
+                            _blockTree.DeleteInvalidBlock(blocks[i]);
+                            if (_logger.IsDebug) _logger.Debug($"Skipped processing of {suggestedBlock.ToString(Block.Format.FullHashAndNumber)} because of {blocks[i].ToString(Block.Format.FullHashAndNumber)} is invalid");
+                            return null;
                         }
-                    }
-
-                    for (int i = 0; i < processedBlocks.Length; i++)
-                    {
-                        _blockTree.MarkAsProcessed(processedBlocks[i].Hash);
-                        if (i == processedBlocks.Length - 1)
-                        {
-                            if (_logger.IsTrace) _logger.Trace($"Setting total on last processed to {processedBlocks[i].ToString(Block.Format.Short)}");
-                            processedBlocks[i].Header.TotalDifficulty = suggestedBlock.TotalDifficulty;
-                        }
-                    }
-
-                    foreach (BlockHeader blockHeader in blocksToBeRemovedFromMain)
-                    {
-                        _blockTree.MoveToBranch(blockHeader.Hash);
-                    }
-
-                    foreach (Block block in blocksToBeAddedToMain)
-                    {
-                        _blockTree.MoveToMain(block);
                     }
                 }
+
+                if ((options & ProcessingOptions.ReadOnlyChain) == 0)
+                {
+                    _blockTree.UpdateMainChain(blocksToBeAddedToMain.ToArray());
+                }
+            }
+            else
+            {
+                if (_logger.IsDebug) _logger.Debug($"Skipped processing of {suggestedBlock.ToString(Block.Format.FullHashAndNumber)}, Head = {_blockTree.Head?.ToString(BlockHeader.Format.Short)}, total diff = {totalDifficulty}, head total diff = {_blockTree.Head?.TotalDifficulty}");
             }
 
-            return (processedBlocks?.Length ?? 0) > 0 ? processedBlocks[processedBlocks.Length - 1] : null;
+            Block lastProcessed = null;
+            if (processedBlocks != null && processedBlocks.Length > 0)
+            {
+                lastProcessed = processedBlocks[processedBlocks.Length - 1];
+                if (_logger.IsTrace) _logger.Trace($"Setting total on last processed to {lastProcessed.ToString(Block.Format.Short)}");
+                lastProcessed.TotalDifficulty = suggestedBlock.TotalDifficulty;
+            }
+            else
+            {
+                if (_logger.IsDebug) _logger.Debug($"Skipped processing of {suggestedBlock.ToString(Block.Format.FullHashAndNumber)}, last processed is null: {lastProcessed == null}, processedBlocks.Length: {processedBlocks?.Length}");
+            }
+
+            return lastProcessed;
         }
 
-        private void RunSimpleChecksAheadOfProcessing(Block suggestedBlock, ProcessingOptions options)
+        [Todo(Improve.Refactor, "This probably can be made conditional (in DEBUG only)")]
+        private bool RunSimpleChecksAheadOfProcessing(Block suggestedBlock, ProcessingOptions options)
         {
-            if (suggestedBlock.Number != 0 && _blockTree.FindParent(suggestedBlock) == null)
+            /* a bit hacky way to get the invalid branch out of the processing loop */
+            if (suggestedBlock.Number != 0 && !_blockTree.IsKnownBlock(suggestedBlock.Number - 1, suggestedBlock.ParentHash))
             {
-                throw new InvalidOperationException("Got an orphaned block for porcessing.");
+                if (_logger.IsDebug) _logger.Debug($"Skipping processing block {suggestedBlock.ToString(Block.Format.FullHashAndNumber)} with unknown parent");
+                return false;
             }
 
             if (suggestedBlock.Header.TotalDifficulty == null)
             {
+                if (_logger.IsDebug) _logger.Debug($"Skipping processing block {suggestedBlock.ToString(Block.Format.FullHashAndNumber)} without total difficulty");
                 throw new InvalidOperationException("Block without total difficulty calculated was suggested for processing");
             }
 
             if ((options & ProcessingOptions.ReadOnlyChain) == 0 && suggestedBlock.Hash == null)
             {
+                if (_logger.IsDebug) _logger.Debug($"Skipping processing block {suggestedBlock.ToString(Block.Format.FullHashAndNumber)} without calculated hash");
                 throw new InvalidOperationException("Block hash should be known at this stage if the block is not read only");
             }
 
@@ -379,9 +435,12 @@ namespace Nethermind.Blockchain
             {
                 if (suggestedBlock.Ommers[i].Hash == null)
                 {
+                    if (_logger.IsDebug) _logger.Debug($"Skipping processing block {suggestedBlock.ToString(Block.Format.FullHashAndNumber)} with null ommer hash ar {i}");
                     throw new InvalidOperationException($"Ommer's {i} hash is null when processing block");
                 }
             }
+
+            return true;
         }
 
         private class BlockRef

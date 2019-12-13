@@ -20,7 +20,7 @@ using System;
 
 namespace Nethermind.Network
 {
-    public class Timeouts
+    public static class Timeouts
     {
         public static readonly TimeSpan InitialConnection = TimeSpan.FromSeconds(10);
         public static readonly TimeSpan TcpClose = TimeSpan.FromSeconds(5);
@@ -28,6 +28,11 @@ namespace Nethermind.Network
         public static readonly TimeSpan P2PPing = TimeSpan.FromSeconds(5);
         public static readonly TimeSpan P2PHello = TimeSpan.FromSeconds(5);
         public static readonly TimeSpan Eth62Status = TimeSpan.FromSeconds(5);
+        public static readonly TimeSpan NdmHi = TimeSpan.FromSeconds(10);
+        public static readonly TimeSpan NdmDeliveryReceipt = TimeSpan.FromSeconds(5);
+        public static readonly TimeSpan NdmDepositApproval = TimeSpan.FromSeconds(5);
+        public static readonly TimeSpan NdmEthRequest = TimeSpan.FromSeconds(5);
+        public static readonly TimeSpan NdmDataRequestResult = TimeSpan.FromSeconds(5);
         public static readonly TimeSpan Handshake = TimeSpan.FromSeconds(5);
         public static readonly TimeSpan Disconnection = TimeSpan.FromSeconds(1);
     }

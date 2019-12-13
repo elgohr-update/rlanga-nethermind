@@ -19,7 +19,6 @@
 using Nethermind.Core;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
-using Nethermind.Dirichlet.Numerics;
 using NUnit.Framework;
 
 namespace Nethermind.Evm.Test
@@ -27,15 +26,15 @@ namespace Nethermind.Evm.Test
     [TestFixture]
     public class CoinbaseTests : VirtualMachineTestsBase
     {
-        protected override UInt256 BlockNumber => RinkebySpecProvider.SpuriousDragonBlockNumber;
+        protected override long BlockNumber => RinkebySpecProvider.SpuriousDragonBlockNumber;
 
         private bool _setAuthor;
         
-        protected override Block BuildBlock(UInt256 blockNumber)
+        protected override Block BuildBlock(long blockNumber)
         {
             Block block = base.BuildBlock(blockNumber);
-            if(_setAuthor) block.Header.Author = TestObject.AddressC;
-            block.Header.Beneficiary = TestObject.AddressB;
+            if(_setAuthor) block.Header.Author = TestItem.AddressC;
+            block.Header.Beneficiary = TestItem.AddressB;
             return block;
         }
 
@@ -52,7 +51,7 @@ namespace Nethermind.Evm.Test
 
             Execute(code);
             
-            AssertStorage(0, TestObject.AddressC);
+            AssertStorage(0, TestItem.AddressC);
         }
         
         [Test]
@@ -68,7 +67,7 @@ namespace Nethermind.Evm.Test
 
             Execute(code);
             
-            AssertStorage(0, TestObject.AddressB);
+            AssertStorage(0, TestItem.AddressB);
         }
     }
 }

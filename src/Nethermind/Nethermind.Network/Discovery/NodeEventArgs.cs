@@ -17,7 +17,6 @@
  */
 
 using System;
-using Nethermind.Stats;
 using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.Discovery
@@ -25,12 +24,10 @@ namespace Nethermind.Network.Discovery
     public class NodeEventArgs : EventArgs
     {
         public Node Node { get; }
-        public INodeStats NodeStats { get; }
 
-        public NodeEventArgs(Node node, INodeStats nodeStats)
+        public NodeEventArgs(Node node)
         {
             Node = node;
-            NodeStats = nodeStats;
         }
     }
 }

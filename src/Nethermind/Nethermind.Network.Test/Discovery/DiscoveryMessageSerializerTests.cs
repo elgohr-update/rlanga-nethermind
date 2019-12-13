@@ -23,8 +23,10 @@ using Nethermind.Core.Extensions;
 using Nethermind.Core.Test.Builders;
 using Nethermind.Network.Config;
 using Nethermind.Network.Discovery.Messages;
+using Nethermind.Network.Discovery.Serializers;
 using Nethermind.Network.Test.Builders;
 using Nethermind.Stats;
+using Nethermind.Stats.Model;
 using NUnit.Framework;
 
 namespace Nethermind.Network.Test.Discovery
@@ -38,18 +40,23 @@ namespace Nethermind.Network.Test.Discovery
         //private readonly PrivateKey _farPrivateKey = new PrivateKey("3a1076bf45ab87712ad64ccb3b10217737f7faacbf2872e88fdd9a537d8fe266");
         private IPEndPoint _farAddress;
         private IPEndPoint _nearAddress;
-        private INetworkConfig _config;
+        private IDiscoveryConfig _config;
+        private INetworkConfig _networkConfig;
         private IMessageSerializationService _messageSerializationService;
-        private ITimestamp _timestamp;
+        private ITimestamper _timestamper;
 
         [SetUp]
         public void Initialize()
         {
-            _config = new NetworkConfig();
+            _config = new DiscoveryConfig();
+            _networkConfig = new NetworkConfig();
+            _networkConfig.ExternalIp = "99.10.10.66";
+            _networkConfig.LocalIp = "10.0.0.5";
+            
             _farAddress = new IPEndPoint(IPAddress.Parse("192.168.1.2"), 1);
-            _nearAddress = new IPEndPoint(IPAddress.Parse(_config.MasterExternalIp), _config.MasterPort);
+            _nearAddress = new IPEndPoint(IPAddress.Parse(_networkConfig.LocalIp), _networkConfig.DiscoveryPort);
             _messageSerializationService = Build.A.SerializationService().WithDiscovery(_privateKey).TestObject;
-            _timestamp = new Timestamp();
+            _timestamper = new Timestamper();
         }
 
         [Test]
@@ -62,7 +69,7 @@ namespace Nethermind.Network.Test.Discovery
                 SourceAddress = _farAddress,
                 Version = _config.PingMessageVersion,
                 FarPublicKey = _privateKey.PublicKey,
-                ExpirationTime = _config.DiscoveryMsgExpiryTime + (long) _timestamp.EpochMilliseconds
+                ExpirationTime = 60 + (long) _timestamper.EpochMilliseconds
             };
 
             var data = _messageSerializationService.Serialize(message);
@@ -87,7 +94,7 @@ namespace Nethermind.Network.Test.Discovery
                 FarAddress = _farAddress,
                 PingMdc = new byte[] {1, 2, 3},
                 FarPublicKey = _privateKey.PublicKey,
-                ExpirationTime = _config.DiscoveryMsgExpiryTime + (long) _timestamp.EpochMilliseconds
+                ExpirationTime = 60 + (long) _timestamper.EpochMilliseconds
             };
 
             var data = _messageSerializationService.Serialize(message);
@@ -111,6 +118,16 @@ namespace Nethermind.Network.Test.Discovery
         }
 
         [Test]
+        [Ignore("Is it some v5 message?")]
+        public void Can_deserialize_the_strange_message()
+        {
+            string message = "46261b14e3783640a24a652205a6fb7afdb94855c07bb9559777d98e54e51562442219fd8673b1a6aef0f4eaa3b1ed39695839775ed634e9b58d56bde116cd1c63e88d9e953bf05b24e9871de8ea630d98f812bdf176b712b7f9ba2c4db242170102f6c3808080cb845adc681b827668827668a070dfc96ee3da9864524f1f0214a35d46b56093f020ee588a05fafe1323335ce7845cc60fd7";
+            var deserializedMessage =
+                _messageSerializationService.Deserialize<PongMessage>(Bytes.FromHexString(message));
+            Assert.IsNotNull(deserializedMessage);
+        }
+
+        [Test]
         public void FindNodeMessageTest()
         {
             var message = new FindNodeMessage
@@ -118,7 +135,7 @@ namespace Nethermind.Network.Test.Discovery
                 FarAddress = _farAddress,
                 SearchedNodeId = new byte[] {1, 2, 3},
                 FarPublicKey = _privateKey.PublicKey,
-                ExpirationTime = _config.DiscoveryMsgExpiryTime + (long) _timestamp.EpochMilliseconds
+                ExpirationTime = 60 + (long) _timestamper.EpochMilliseconds
             };
 
             var data = _messageSerializationService.Serialize(message);
@@ -134,18 +151,17 @@ namespace Nethermind.Network.Test.Discovery
         [Test]
         public void NeighborsMessageTest()
         {
-            var nodeFactory = new NodeFactory();
-
             var message = new NeighborsMessage
             {
                 FarAddress = _farAddress,
                 Nodes = new[]
                 {
-                    nodeFactory.CreateNode("192.168.1.2", 1), nodeFactory.CreateNode("192.168.1.3", 2),
-                    nodeFactory.CreateNode("192.168.1.4", 3)
+                    new Node("192.168.1.2", 1),
+                    new Node("192.168.1.3", 2),
+                    new Node("192.168.1.4", 3)
                 },
                 FarPublicKey = _privateKey.PublicKey,
-                ExpirationTime = _config.DiscoveryMsgExpiryTime + (long) _timestamp.EpochMilliseconds
+                ExpirationTime = 60 + (long) _timestamper.EpochMilliseconds
             };
 
             var data = _messageSerializationService.Serialize(message);
@@ -159,7 +175,7 @@ namespace Nethermind.Network.Test.Discovery
             {
                 Assert.AreEqual(message.Nodes[i].Host, deserializedMessage.Nodes[i].Host);
                 Assert.AreEqual(message.Nodes[i].Port, deserializedMessage.Nodes[i].Port);
-                Assert.AreEqual(message.Nodes[i].IdHashText, deserializedMessage.Nodes[i].IdHashText);
+                Assert.AreEqual(message.Nodes[i].IdHash, deserializedMessage.Nodes[i].IdHash);
                 Assert.AreEqual(message.Nodes[i], deserializedMessage.Nodes[i]);
             }
         }

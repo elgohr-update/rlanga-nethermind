@@ -20,9 +20,9 @@ using System.Text;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Model;
 using Nethermind.Core.Specs;
+using Nethermind.Logging;
 using Nethermind.Network.Crypto;
 using Nethermind.Network.Rlpx;
 using Nethermind.Network.Rlpx.Handshake;
@@ -56,8 +56,8 @@ namespace Nethermind.Network.Test.Rlpx.Handshake
 
             _eciesCipher = new EciesCipher(_trueCryptoRandom); // TODO: provide a separate test random with specific IV and epehemeral key for testing
 
-            _initiatorService = new EncryptionHandshakeService(_messageSerializationService, _eciesCipher, _testRandom, _signer, NetTestVectors.StaticKeyA, NullLogManager.Instance);
-            _recipientService = new EncryptionHandshakeService(_messageSerializationService, _eciesCipher, _testRandom, _signer, NetTestVectors.StaticKeyB, NullLogManager.Instance);
+            _initiatorService = new HandshakeService(_messageSerializationService, _eciesCipher, _testRandom, _ecdsa, NetTestVectors.StaticKeyA, NullLogManager.Instance);
+            _recipientService = new HandshakeService(_messageSerializationService, _eciesCipher, _testRandom, _ecdsa, NetTestVectors.StaticKeyB, NullLogManager.Instance);
 
             _initiatorHandshake = new EncryptionHandshake();
             _recipientHandshake = new EncryptionHandshake();
@@ -66,7 +66,7 @@ namespace Nethermind.Network.Test.Rlpx.Handshake
             _ack = null;
         }
 
-        private readonly IEthereumSigner _signer = new EthereumSigner(RopstenSpecProvider.Instance, NullLogManager.Instance); // TODO: separate general crypto signer from Ethereum transaction signing
+        private readonly IEthereumEcdsa _ecdsa = new EthereumEcdsa(RopstenSpecProvider.Instance, NullLogManager.Instance); // TODO: separate general crypto signer from Ethereum transaction signing
 
         private IMessageSerializationService _messageSerializationService;
 
@@ -76,9 +76,9 @@ namespace Nethermind.Network.Test.Rlpx.Handshake
 
         private IEciesCipher _eciesCipher;
 
-        private IEncryptionHandshakeService _initiatorService;
+        private IHandshakeService _initiatorService;
 
-        private IEncryptionHandshakeService _recipientService;
+        private IHandshakeService _recipientService;
 
         private EncryptionHandshake _initiatorHandshake;
         private EncryptionHandshake _recipientHandshake;
@@ -88,7 +88,7 @@ namespace Nethermind.Network.Test.Rlpx.Handshake
 
         private void Auth()
         {
-            _auth = _initiatorService.Auth(new NodeId(NetTestVectors.StaticKeyB.PublicKey), _initiatorHandshake);
+            _auth = _initiatorService.Auth(NetTestVectors.StaticKeyB.PublicKey, _initiatorHandshake);
         }
 
         private void Ack()
@@ -107,7 +107,7 @@ namespace Nethermind.Network.Test.Rlpx.Handshake
         [Test]
         public void Aes_and_mac_secrets_as_in_test_vectors()
         {
-            Packet auth = _initiatorService.Auth(new NodeId(NetTestVectors.StaticKeyB.PublicKey), _initiatorHandshake);
+            Packet auth = _initiatorService.Auth(NetTestVectors.StaticKeyB.PublicKey, _initiatorHandshake);
             // TODO: cannot recover signature from this one...
             auth.Data = Bytes.FromHexString(
                 "01b304ab7578555167be8154d5cc456f567d5ba302662433674222360f08d5f1534499d3678b513b" +

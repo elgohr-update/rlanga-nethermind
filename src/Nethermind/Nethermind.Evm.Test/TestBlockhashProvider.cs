@@ -16,16 +16,14 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using System.Numerics;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Evm.Test
 {
     public class TestBlockhashProvider : IBlockhashProvider
     {
-        public Keccak GetBlockhash(BlockHeader currentBlock, UInt256 number)
+        public Keccak GetBlockhash(BlockHeader currentBlock, in long number)
         {
             return Keccak.Compute(number.ToString());
         }

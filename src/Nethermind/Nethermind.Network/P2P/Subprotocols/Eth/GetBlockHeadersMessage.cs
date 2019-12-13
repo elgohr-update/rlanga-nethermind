@@ -17,9 +17,7 @@
  */
 
 using System.Diagnostics;
-using System.Numerics;
 using Nethermind.Core.Crypto;
-using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Network.P2P.Subprotocols.Eth
 { 
@@ -29,10 +27,10 @@ namespace Nethermind.Network.P2P.Subprotocols.Eth
         public override int PacketType { get; } = Eth62MessageCode.GetBlockHeaders;
         public override string Protocol { get; } = "eth";
 
-        public UInt256 StartingBlockNumber { get; set; }
+        public long StartingBlockNumber { get; set; }
         public Keccak StartingBlockHash { get; set; }
-        public BigInteger MaxHeaders { get; set; }
-        public BigInteger Skip { get; set; }
-        public BigInteger Reverse { get; set; }
+        public long MaxHeaders { get; set; }
+        public long Skip { get; set; }
+        public byte Reverse { get; set; }
     }
 }

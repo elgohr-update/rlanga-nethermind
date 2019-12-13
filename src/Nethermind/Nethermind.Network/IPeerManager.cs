@@ -16,14 +16,18 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System.Collections.Generic;
 using System.Threading.Tasks;
 
 namespace Nethermind.Network
 {
     public interface IPeerManager
     {
-        void Init(bool isDiscoveryEnabled);
-        Task Start();
+        void Init();
+        void Start();
         Task StopAsync();
+        void LogSessionStats(bool logEventDetails);
+
+        IReadOnlyCollection<Peer> ActivePeers { get; }
     }
 }

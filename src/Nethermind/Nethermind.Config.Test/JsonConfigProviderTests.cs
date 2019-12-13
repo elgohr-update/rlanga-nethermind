@@ -1,12 +1,29 @@
-﻿using System;
+﻿/*
+ * Copyright (c) 2018 Demerzel Solutions Limited
+ * This file is part of the Nethermind library.
+ *
+ * The Nethermind library is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * The Nethermind library is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
+ */
+
 using System.IO;
 using System.Linq;
-using Castle.Core.Logging;
-using Nethermind.JsonRpc.Config;
-using Nethermind.JsonRpc.DataModel;
+using Nethermind.Core;
+using Nethermind.JsonRpc;
+using Nethermind.JsonRpc.Modules;
 using Nethermind.KeyStore.Config;
+using Nethermind.Logging;
 using Nethermind.Network.Config;
-using Nethermind.Network.P2P;
 using Nethermind.Stats;
 using Nethermind.Stats.Model;
 using NUnit.Framework;
@@ -21,33 +38,35 @@ namespace Nethermind.Config.Test
         [SetUp]
         public void Initialize()
         {
-            var keystoreConfig = new KeystoreConfig();
+            var keystoreConfig = new KeyStoreConfig();
             var networkConfig = new NetworkConfig();
             var jsonRpcConfig = new JsonRpcConfig();
             var statsConfig = new StatsConfig();
 
-            _configProvider = new JsonConfigProvider();
+            _configProvider = new JsonConfigProvider("SampleJsonConfig.cfg");
         }
 
         [Test]
-        public void TestLoadJsonConfig()
+        public void Provides_helpful_error_message_when_file_does_not_exist()
         {
-            _configProvider.LoadJsonConfig("SampleJsonConfig.json");
-
-            var keystoreConfig = _configProvider.GetConfig<IKeystoreConfig>();
-            var networkConfig = _configProvider.GetConfig<INetworkConfig>();
+            Assert.Throws<IOException>(() => _configProvider = new JsonConfigProvider("SampleJson.cfg"));
+        }
+        
+        [Test]
+        public void Can_load_config_from_file()
+        {
+            var keystoreConfig = _configProvider.GetConfig<IKeyStoreConfig>();
+            var networkConfig = _configProvider.GetConfig<IDiscoveryConfig>();
             var jsonRpcConfig = _configProvider.GetConfig<IJsonRpcConfig>();
             var statsConfig = _configProvider.GetConfig<IStatsConfig>();
 
             Assert.AreEqual(100, keystoreConfig.KdfparamsDklen);
             Assert.AreEqual("test", keystoreConfig.Cipher);
-
-            Assert.AreEqual("test", jsonRpcConfig.JsonRpcVersion);           
-            Assert.AreEqual("UTF7", jsonRpcConfig.MessageEncoding);
+          
             Assert.AreEqual(2, jsonRpcConfig.EnabledModules.Count());
-            new[] { ModuleType.Eth, ModuleType.Shh }.ToList().ForEach(x =>
+            new[] { ModuleType.Eth, ModuleType.Debug }.ToList().ForEach(x =>
             {
-                Assert.IsTrue(jsonRpcConfig.EnabledModules.Contains(x));
+                Assert.IsTrue(jsonRpcConfig.EnabledModules.Contains(x.ToString()));
             });
 
             Assert.AreEqual(4, networkConfig.Concurrency);
@@ -57,17 +76,19 @@ namespace Nethermind.Config.Test
             {
                 Assert.IsTrue(statsConfig.PenalizedReputationLocalDisconnectReasons.Contains(x));
             });
-            Assert.AreEqual(2, networkConfig.BootNodes.Length);
 
-            var node1 = networkConfig.BootNodes.FirstOrDefault(x => x.NodeId == "testNodeId");
+            NetworkNode[] nodes = NetworkNode.ParseNodes(networkConfig.Bootnodes, LimboNoErrorLogger.Instance);
+            Assert.AreEqual(2, nodes.Length);
+
+            var node1 = nodes[0];
             Assert.IsNotNull(node1);
-            Assert.AreEqual("testHist", node1.Host);
-            Assert.AreEqual(43, node1.Port);
+            Assert.AreEqual("40.70.214.166", node1.Host);
+            Assert.AreEqual(40303, node1.Port);
 
-            var node2 = networkConfig.BootNodes.FirstOrDefault(x => x.NodeId == "testNodeId2");
+            var node2 = nodes[1];
             Assert.IsNotNull(node2);
-            Assert.AreEqual("testHist2", node2.Host);
-            Assert.AreEqual(44, node2.Port);
+            Assert.AreEqual("213.186.16.82", node2.Host);
+            Assert.AreEqual(1345, node2.Port);
         }
     }
 }

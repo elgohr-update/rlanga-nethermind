@@ -20,15 +20,15 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Numerics;
 using Nethermind.Blockchain.Validators;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
+using Nethermind.Core.Specs.Forks;
 using Nethermind.Dirichlet.Numerics;
+using Nethermind.Logging;
 using Newtonsoft.Json;
 using NUnit.Framework;
 
@@ -193,8 +193,7 @@ namespace Ethereum.Transaction.Test
 
             bool useChainId = transaction.Signature.V > 28;            
             
-            SignatureValidator signatureValidator = new SignatureValidator(useChainId ? ChainId.MainNet : 0);
-            TransactionValidator validator = new TransactionValidator(signatureValidator);
+            TxValidator validator = new TxValidator(useChainId ? ChainId.MainNet : 0);
 
             if (validTest != null)
             {
@@ -210,8 +209,8 @@ namespace Ethereum.Transaction.Test
                 Assert.AreEqual(expectedSignature, transaction.Signature, "signature");
 //                if(useChainId && spec.IsEip155Enabled)
 //                
-                IEthereumSigner signer = new EthereumSigner(new SingleReleaseSpecProvider(spec, useChainId ? (int)ChainId.MainNet : 0), NullLogManager.Instance);
-                bool verified = signer.Verify(
+                IEthereumEcdsa ecdsa = new EthereumEcdsa(new SingleReleaseSpecProvider(spec, useChainId ? (int)ChainId.MainNet : 0), NullLogManager.Instance);
+                bool verified = ecdsa.Verify(
                     validTest.Sender,
                     transaction,
                     0);

@@ -21,19 +21,18 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
 using Nethermind.Network.Discovery.Messages;
-using Nethermind.Stats;
 
 namespace Nethermind.Network.Discovery.Serializers
 {
     public class PingMessageSerializer : DiscoveryMessageSerializerBase, IMessageSerializer<PingMessage>
     {
-        public PingMessageSerializer(ISigner signer, IPrivateKeyGenerator privateKeyGenerator, IDiscoveryMessageFactory messageFactory, INodeIdResolver nodeIdResolver, INodeFactory nodeFactory) : base(signer, privateKeyGenerator, messageFactory, nodeIdResolver, nodeFactory)
+        public PingMessageSerializer(IEcdsa ecdsa, IPrivateKeyGenerator privateKeyGenerator, IDiscoveryMessageFactory messageFactory, INodeIdResolver nodeIdResolver) : base(ecdsa, privateKeyGenerator, messageFactory, nodeIdResolver)
         {
         }
 
         public byte[] Serialize(PingMessage message)
         {
-            byte[] typeBytes = { (byte)message.MessageType };
+            byte typeByte = (byte)message.MessageType;
             Rlp source = Encode(message.SourceAddress);
             Rlp destination = Encode(message.DestinationAddress);
             byte[] data = Rlp.Encode(
@@ -44,7 +43,7 @@ namespace Nethermind.Network.Discovery.Serializers
                 Rlp.Encode(message.ExpirationTime)
             ).Bytes;
 
-            byte[] serializedMsg = Serialize(typeBytes, data);
+            byte[] serializedMsg = Serialize(typeByte, data);
             return serializedMsg;
         }
 
@@ -52,7 +51,7 @@ namespace Nethermind.Network.Discovery.Serializers
         {
             var results = PrepareForDeserialization<PingMessage>(msg);
             
-            var rlp = results.Data.AsRlpContext();
+            var rlp = results.Data.AsRlpStream();
             rlp.ReadSequenceLength();
             var version = rlp.DecodeInt();
 

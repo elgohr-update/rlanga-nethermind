@@ -27,12 +27,20 @@ namespace Nethermind.Core
     public class Bloom : IEquatable<Bloom>
     {
         public static readonly Bloom Empty = new Bloom();
+        
+        private static readonly byte[] EmptyBloomBytes = new byte[256];
 
         private readonly BitArray _bits;
 
         public Bloom()
         {
             _bits = new BitArray(2048);
+        }
+        
+        public Bloom(LogEntry[] logEntries, Bloom blockBloom = null)
+        {
+            _bits = new BitArray(2048);
+            Add(logEntries, blockBloom);
         }
 
         public Bloom(BitArray bitArray)
@@ -45,18 +53,33 @@ namespace Nethermind.Core
             _bits = bitArray;
         }
 
-        public byte[] Bytes => _bits.ToBytes();
+        public byte[] Bytes => ReferenceEquals(this, Empty) ?  EmptyBloomBytes : _bits.ToBytes();
 
         public void Set(byte[] sequence)
         {
-            byte[] keccakBytes = Keccak.Compute(sequence).Bytes;
-            for (int i = 0; i < 6; i += 2)
+            Set(sequence, null);
+        }
+        
+        private void Set(byte[] sequence, Bloom masterBloom)
+        {
+            var indexes = GetExtract(sequence);
+            _bits.Set(indexes.Index1, true);
+            _bits.Set(indexes.Index2, true);
+            _bits.Set(indexes.Index3, true);
+            if (masterBloom != null)
             {
-                int index = 2047 - ((keccakBytes[i] << 8) + keccakBytes[i + 1]) % 2048;
-                _bits.Set(index, true);
+                masterBloom._bits.Set(indexes.Index1, true);
+                masterBloom._bits.Set(indexes.Index2, true);
+                masterBloom._bits.Set(indexes.Index3, true);
             }
         }
-
+        
+        public bool Matches(byte[] sequence)
+        {
+            var indexes = GetExtract(sequence);
+            return Matches(ref indexes);
+        }
+        
         public override string ToString()
         {
             StringBuilder stringBuilder = new StringBuilder();
@@ -117,6 +140,77 @@ namespace Nethermind.Core
         public override int GetHashCode()
         {
             return _bits != null ? _bits.GetHashCode() : 0;
+        }
+        
+        public void Add(LogEntry[] logEntries, Bloom blockBloom = null)
+        {
+            for (int entryIndex = 0; entryIndex < logEntries.Length; entryIndex++)
+            {
+                LogEntry logEntry = logEntries[entryIndex];
+                byte[] addressBytes = logEntry.LoggersAddress.Bytes;
+                Set(addressBytes, blockBloom);
+                for (int topicIndex = 0; topicIndex < logEntry.Topics.Length; topicIndex++)
+                {
+                    Keccak topic = logEntry.Topics[topicIndex];
+                    Set(topic.Bytes, blockBloom);
+                }
+            }
+        }
+        
+        public bool Matches(LogEntry logEntry)
+        {
+            if (Matches(logEntry.LoggersAddress))
+            {
+                for (int topicIndex = 0; topicIndex < logEntry.Topics.Length; topicIndex++)
+                {
+                    if (!Matches(logEntry.Topics[topicIndex]))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+
+        public bool Matches(Address address) => Matches(address.Bytes);
+        
+        public bool Matches(Keccak topic) => Matches(topic.Bytes);
+        
+        public bool Matches(ref BloomExtract extract) => _bits[extract.Index1] && _bits[extract.Index2] && _bits[extract.Index3];
+
+        public bool Matches(BloomExtract extract) => Matches(ref extract);
+        
+        public static BloomExtract GetExtract(Address address) => GetExtract(address.Bytes);
+        
+        public  static BloomExtract GetExtract(Keccak topic) => GetExtract(topic.Bytes);
+
+        private static BloomExtract GetExtract(byte[] sequence)
+        {
+            int GetIndex(Span<byte> bytes, int index1, int index2)
+            {
+                return 2047 - ((bytes[index1] << 8) + bytes[index2]) % 2048;
+            }
+
+            var keccakBytes = ValueKeccak.Compute(sequence).BytesAsSpan;
+            var indexes = new BloomExtract(GetIndex(keccakBytes, 0, 1), GetIndex(keccakBytes, 2, 3), GetIndex(keccakBytes, 4, 5));
+            return indexes;
+        }
+        
+        public struct BloomExtract
+        {
+            public BloomExtract(int index1, int index2, int index3)
+            {
+                Index1 = index1;
+                Index2 = index2;
+                Index3 = index3;
+            }
+            
+            public int Index1 { get; }
+            public int Index2 { get; }
+            public int Index3 { get; }
         }
     }
 }

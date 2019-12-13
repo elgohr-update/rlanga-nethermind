@@ -16,6 +16,7 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using Nethermind.Core.Crypto;
 using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Core.Test.Builders
@@ -30,6 +31,24 @@ namespace Nethermind.Core.Test.Builders
         public AccountBuilder WithBalance(UInt256 balance)
         {
             TestObjectInternal = TestObjectInternal.WithChangedBalance(balance);
+            return this;
+        }
+        
+        public AccountBuilder WithNonce(UInt256 nonce)
+        {
+            TestObjectInternal = TestObjectInternal.WithChangedNonce(nonce);
+            return this;
+        }
+        
+        public AccountBuilder WithCode(byte[] code)
+        {
+            TestObjectInternal = TestObjectInternal.WithChangedCodeHash(Keccak.Compute(code));
+            return this;
+        }
+        
+        public AccountBuilder WithStorageRoot(Keccak storageRoot)
+        {
+            TestObjectInternal = TestObjectInternal.WithChangedStorageRoot(storageRoot);
             return this;
         }
     }

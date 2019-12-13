@@ -16,17 +16,15 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Core.Specs.Forks;
 
 namespace Nethermind.Core.Specs
 {
     public class RopstenSpecProvider : ISpecProvider
     {
-        public IReleaseSpec CurrentSpec => Byzantium.Instance;
-
         public IReleaseSpec GenesisSpec => TangerineWhistle.Instance;
 
-        public IReleaseSpec GetSpec(UInt256 blockNumber)
+        public IReleaseSpec GetSpec(long blockNumber)
         {            
             if (blockNumber < SpuriousDragonBlockNumber)
             {
@@ -42,17 +40,29 @@ namespace Nethermind.Core.Specs
             {
                 return Byzantium.Instance;
             }
+            
+            if (blockNumber < ConstantinopleFixBlockNumber)
+            {
+                return Constantinople.Instance;
+            }
+            
+            if (blockNumber < IstanbulBlockNumber)
+            {
+                return ConstantinopleFix.Instance;
+            }
 
-            return Constantinople.Instance;
+            return Istanbul.Instance;
         }
         
-        public UInt256? DaoBlockNumber { get; } = null;
-        public static UInt256 SpuriousDragonBlockNumber { get; } = 10;
-        public static UInt256 ByzantiumBlockNumber { get; } = 1700000;
-        public static UInt256 ConstantinopleBlockNumber { get; } = 4230000;
+        public long? DaoBlockNumber { get; } = null;
+        public static long SpuriousDragonBlockNumber { get; } = 10;
+        public static long ByzantiumBlockNumber { get; } = 1700000;
+        public static long ConstantinopleBlockNumber { get; } = 4230000;
+        public static long ConstantinopleFixBlockNumber { get; } = 4939394;
+        public static long IstanbulBlockNumber { get; } = 6485846;
         
         public int ChainId => 3;
-
+        
         private RopstenSpecProvider()
         {
         }

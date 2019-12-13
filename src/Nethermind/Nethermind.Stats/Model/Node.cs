@@ -19,55 +19,87 @@
 using System;
 using System.Net;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Model;
 
 namespace Nethermind.Stats.Model
-{
-    public class Node
+{   
+    public class Node : IFormattable
     {
-        public Node(NodeId id)
-        {
-            Id = id;
-            //Bytes or PrefixBytes?
+        private PublicKey _id;
 
-            IdHash = Keccak.Compute(id.PublicKey.PrefixedBytes);
-            IdHashText = IdHash.ToString();
+        public PublicKey Id
+        {
+            get => _id;
+            set
+            {
+                if (_id != null)
+                {
+                    throw new InvalidOperationException($"ID already set for the node {Id}");
+                }
+
+                _id = value;
+                IdHash = Keccak.Compute(_id.PrefixedBytes);
+            }
         }
 
-        //id is bytes without prefix byte - 64 bytes
-        public NodeId Id { get; }
-        public Keccak IdHash { get; }
-        public string IdHashText { get; }
+        public Keccak IdHash { get; private set; }
         public string Host { get; private set; }
         public int Port { get; set; }
         public IPEndPoint Address { get; private set; }
-        public bool IsDicoveryNode { get; set; }
-        public string Description { get; set; }
+        public bool AddedToDiscovery { get; set; }
+        public bool IsBootnode { get; set; }
+        public bool IsTrusted { get; set; }
 
-        public void InitializeAddress(IPEndPoint address)
+        public bool IsStatic { get; set; }
+
+        public string ClientId { get; set; }
+
+        public Node(PublicKey id, IPEndPoint address)
+        {
+            Id = id;
+            AddedToDiscovery = false;
+            InitializeAddress(address);
+        }
+
+        public Node(PublicKey id, string host, int port, bool addedToDiscovery = false)
+        {
+            Id = id;
+            AddedToDiscovery = addedToDiscovery;
+            InitializeAddress(host, port);
+        }
+
+        public Node(string host, int port, bool isStatic = false)
+        {
+            Keccak512 socketHash = Keccak512.Compute($"{host}:{port}");
+            Id = new PublicKey(socketHash.Bytes);
+            AddedToDiscovery = true;
+            IsStatic = isStatic;
+            InitializeAddress(host, port);
+        }
+
+        private void InitializeAddress(IPEndPoint address)
         {
             Host = address.Address.ToString();
             Port = address.Port;
             Address = address;
         }
 
-        public void InitializeAddress(string host, int port)
+        private void InitializeAddress(string host, int port)
         {
             Host = host;
             Port = port;
             Address = new IPEndPoint(IPAddress.Parse(host), port);
         }
-
+        
         public override bool Equals(object obj)
         {
             if (ReferenceEquals(this, obj))
             {
                 return true;
             }
-            
+
             if (obj is Node item)
             {
-                return string.Compare(IdHashText, item.IdHashText, StringComparison.InvariantCultureIgnoreCase) == 0;
+                return IdHash.Equals(item.IdHash);
             }
 
             return false;
@@ -75,12 +107,53 @@ namespace Nethermind.Stats.Model
 
         public override int GetHashCode()
         {
-            return IdHashText.GetHashCode();
+            return (_id != null ? _id.GetHashCode() : 0);
         }
 
         public override string ToString()
         {
-            return $"Id: {Id}, Host: {Host}, RemotePort: {Port}, IsDiscovery: {IsDicoveryNode}";
+            return $"enode://{Id.ToString(false)}@{Host}:{Port}|{Id.Address}";
+        }
+
+        public string ToString(string format)
+        {
+            return ToString(format, null);
+        }  
+       
+        public string ToString(string format, IFormatProvider formatProvider)
+        {
+            string formattedHost = Host?.Replace("::ffff:", string.Empty);
+            switch (format)
+            {
+                default:
+                    return $"enode://{Id.ToString(false)}@{formattedHost}:{Port}";
+                case "s":
+                    return $"{formattedHost}:{Port}";
+                case "c":
+                    return $"[Node|{formattedHost}:{Port}|{ClientId}]";
+                case "f":
+                    return $"enode://{Id.ToString(false)}@{formattedHost}:{Port}|{ClientId}";    
+            }
+        }
+        
+        public static bool operator ==(Node a, Node b)
+        {
+            if (ReferenceEquals(a, null))
+            {
+                return ReferenceEquals(b, null);
+            }
+
+            if (ReferenceEquals(b, null))
+            {
+                return false;
+            }
+
+            return a.Id.Equals(b.Id);
+        }
+
+        public static bool operator !=(Node a, Node b)
+        {
+            return !(a == b);
         }
     }
 }

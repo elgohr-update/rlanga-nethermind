@@ -18,13 +18,12 @@
 
 using System;
 using System.Numerics;
+using System.Reflection.Metadata.Ecma335;
 using Nethermind.Core.Extensions;
+using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Core.Crypto
 {
-    /// <summary>
-    /// TODO: can I mark it as a EIP155 signature? otherwise it should not be accepted with V > 28
-    /// </summary>
     public class Signature : IEquatable<Signature>
     {
         public Signature(byte[] bytes, int recoveryId)
@@ -48,41 +47,40 @@ namespace Nethermind.Core.Crypto
             Buffer.BlockCopy(bytes, 0, Bytes, 0, 64);
             V = bytes[64];
         }
-
-        public Signature(byte[] r, byte[] s, int v)
+        
+        public Signature(Span<byte> bytes)
         {
-            if (r.Length != 32)
+            if (bytes.Length != 65)
             {
-                throw new ArgumentException(nameof(r));
+                throw new ArgumentException();
             }
 
-            if (s.Length != 32)
-            {
-                throw new ArgumentException(nameof(s));
-            }
+            bytes.Slice(0, 64).CopyTo(Bytes.AsSpan());
+            V = bytes[64];
+        }
 
+        public Signature(Span<byte> r, Span<byte> s, int v)
+        {
             if (v < 27)
             {
                 throw new ArgumentException(nameof(v));
             }
 
-            Buffer.BlockCopy(r, 0, Bytes, 0, 32);
-            Buffer.BlockCopy(s, 0, Bytes, 32, 32);
+            r.CopyTo(Bytes.AsSpan().Slice(32 - r.Length, r.Length));
+            s.CopyTo(Bytes.AsSpan().Slice(64 - s.Length, s.Length));
             V = v;
         }
 
-        public Signature(BigInteger r, BigInteger s, int v)
+        public Signature(UInt256 r, UInt256 s, int v)
         {
             if (v < 27)
             {
                 throw new ArgumentException(nameof(v));
             }
 
-            byte[] rBytes = r.ToBigEndianByteArray();
-            byte[] sBytes = s.ToBigEndianByteArray();
+            r.ToBigEndian(Bytes.AsSpan().Slice(0, 32));
+            s.ToBigEndian(Bytes.AsSpan().Slice(32, 32));
 
-            Buffer.BlockCopy(rBytes.PadLeft(32), 0, Bytes, 0, 32);
-            Buffer.BlockCopy(sBytes.PadLeft(32), 0, Bytes, 32, 32);
             V = v;
         }
 
@@ -93,27 +91,30 @@ namespace Nethermind.Core.Crypto
 
         public byte[] Bytes { get; } = new byte[64];
         public int V { get; set; }
-        
-        /* is it correct for Goerli? */
+
+        public int? ChainId => V < 35 ? null : (int?) (V + (V % 2) - 36) / 2;
+
         public byte RecoveryId
         {
             get
             {
                 if (V <= 28)
                 {
-                    return (byte)(V - 27);
+                    return (byte) (V - 27);
                 }
 
-                return (byte)(1 - V % 2);
+                return (byte) (1 - V % 2);
             }
         }
 
         public byte[] R => Bytes.Slice(0, 32);
+        public Span<byte> RAsSpan => Bytes.AsSpan().Slice(0, 32);
         public byte[] S => Bytes.Slice(32, 32);
+        public Span<byte> SAsSpan => Bytes.AsSpan().Slice(32, 32);
 
         public override string ToString()
         {
-            string vString = V.ToString("X").ToLower();            
+            string vString = V.ToString("X").ToLower();
             return string.Concat(Bytes.ToHexString(true), vString.Length % 2 == 0 ? vString : string.Concat("0", vString));
         }
 
@@ -129,7 +130,7 @@ namespace Nethermind.Core.Crypto
             if (ReferenceEquals(null, obj)) return false;
             if (ReferenceEquals(this, obj)) return true;
             if (obj.GetType() != GetType()) return false;
-            return Equals((Signature)obj);
+            return Equals((Signature) obj);
         }
 
         public override int GetHashCode()

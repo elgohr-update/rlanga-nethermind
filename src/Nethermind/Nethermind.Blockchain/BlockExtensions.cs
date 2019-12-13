@@ -19,13 +19,35 @@
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
+using Nethermind.Core.Specs;
 using Nethermind.Store;
 
 namespace Nethermind.Blockchain
 {
     public static class BlockExtensions
     {
-        public static Keccak CalculateTransactionsRoot(this Block block)
+        private static ReceiptDecoder _receiptDecoder = new ReceiptDecoder();
+        private static TransactionDecoder _txDecoder = new TransactionDecoder();
+        
+        public static Keccak CalculateReceiptRoot(this Block block, ISpecProvider specProvider, TxReceipt[] txReceipts)
+        {
+            if (txReceipts.Length == 0)
+            {
+                return PatriciaTree.EmptyTreeHash;
+            }
+            
+            PatriciaTree receiptTree = new PatriciaTree();
+            for (int i = 0; i < txReceipts.Length; i++)
+            {
+                byte[] receiptRlp = _receiptDecoder.EncodeNew(txReceipts[i], specProvider.GetSpec(block.Number).IsEip658Enabled ? RlpBehaviors.Eip658Receipts : RlpBehaviors.None);
+                receiptTree.Set(Rlp.Encode(i).Bytes, receiptRlp);
+            }
+
+            receiptTree.UpdateRootHash();
+            return receiptTree.RootHash;
+        }
+        
+        public static Keccak CalculateTxRoot(this Block block)
         {
             if (block.Transactions.Length == 0)
             {
@@ -35,12 +57,19 @@ namespace Nethermind.Blockchain
             PatriciaTree txTree = new PatriciaTree();
             for (int i = 0; i < block.Transactions.Length; i++)
             {
-                Rlp transactionRlp = Rlp.Encode(block.Transactions[i]);
-                txTree.Set(Rlp.Encode(i).Bytes, transactionRlp);
+                Rlp transactionRlp = _txDecoder.Encode(block.Transactions[i]);
+                txTree.Set(Rlp.Encode(i).Bytes, transactionRlp.Bytes);
             }
 
             txTree.UpdateRootHash();
             return txTree.RootHash;
+        }
+        
+        public static Keccak CalculateOmmersHash(this Block block)
+        {
+            return block.Ommers.Length == 0
+                ? Keccak.OfAnEmptySequenceRlp
+                : Keccak.Compute(Rlp.Encode(block.Ommers));
         }
     }
 }

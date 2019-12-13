@@ -17,29 +17,35 @@
  */
 
 using System;
+using System.Threading;
 using System.Threading.Tasks;
-using Nethermind.Core;
-using Nethermind.Core.Logging;
+using DotNetty.Buffers;
+using Nethermind.Logging;
 using Nethermind.Network.Rlpx;
+using Nethermind.Stats;
 using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.P2P
 {
     public abstract class ProtocolHandlerBase
     {
+        protected INodeStatsManager StatsManager { get; }
         private readonly IMessageSerializationService _serializer;
-        protected IP2PSession P2PSession { get; }
+        protected ISession Session { get; }
         private readonly TaskCompletionSource<MessageBase> _initCompletionSource;
 
-        protected ProtocolHandlerBase(IP2PSession p2PSession, IMessageSerializationService serializer, ILogManager logManager)
+        protected ProtocolHandlerBase(ISession session, INodeStatsManager nodeStats, IMessageSerializationService serializer, ILogManager logManager)
         {
-            Logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
+            Logger = logManager?.GetClassLogger(GetType()) ?? throw new ArgumentNullException(nameof(logManager));
+            StatsManager = nodeStats ?? throw new ArgumentNullException(nameof(nodeStats));
+            Session = session ?? throw new ArgumentNullException(nameof(session));
+            
             _serializer = serializer ?? throw new ArgumentNullException(nameof(serializer));
-            P2PSession = p2PSession ?? throw new ArgumentNullException(nameof(p2PSession));
             _initCompletionSource = new TaskCompletionSource<MessageBase>();
         }
 
         protected ILogger Logger { get; }
+        
         protected abstract TimeSpan InitTimeout { get; }
 
         protected T Deserialize<T>(byte[] data) where T : P2PMessage
@@ -47,26 +53,35 @@ namespace Nethermind.Network.P2P
             return _serializer.Deserialize<T>(data);
         }
 
+        protected T Deserialize<T>(IByteBuffer data) where T : P2PMessage
+        {
+            return _serializer.Deserialize<T>(data);
+        }
+        
         protected void Send<T>(T message) where T : P2PMessage
         {
             if (Logger.IsTrace) Logger.Trace($"Sending {typeof(T).Name}");
-            Packet packet = new Packet(message.Protocol, message.PacketType, _serializer.Serialize(message));
-            P2PSession.DeliverMessage(packet);   
+            Session.DeliverMessage(message);   
         }
 
         protected async Task CheckProtocolInitTimeout()
         {
             var receivedInitMsgTask = _initCompletionSource.Task;
-            var firstTask = await Task.WhenAny(receivedInitMsgTask, Task.Delay(InitTimeout));
+            CancellationTokenSource delayCancellation = new CancellationTokenSource();
+            var firstTask = await Task.WhenAny(receivedInitMsgTask, Task.Delay(InitTimeout, delayCancellation.Token));
             
             if (firstTask != receivedInitMsgTask)
             {
                 if (Logger.IsTrace)
                 {
-                    Logger.Trace($"Disconnecting due to timeout for protocol init message ({GetType().Name}): {P2PSession.RemoteNodeId}");
+                    Logger.Trace($"Disconnecting due to timeout for protocol init message ({GetType().Name}): {Session.RemoteNodeId}");
                 }
                 
-                await P2PSession.InitiateDisconnectAsync(DisconnectReason.ReceiveMessageTimeout);
+                Session.InitiateDisconnect(DisconnectReason.ReceiveMessageTimeout, "protocol init timeout");
+            }
+            else
+            {
+                delayCancellation.Cancel();    
             }
         }
 

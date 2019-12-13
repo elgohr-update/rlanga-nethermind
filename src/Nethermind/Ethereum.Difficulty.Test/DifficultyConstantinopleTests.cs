@@ -20,11 +20,12 @@
 using System.Collections.Generic;
 using Nethermind.Core;
 using Nethermind.Core.Specs;
+using Nethermind.Core.Specs.Forks;
 using NUnit.Framework;
 
 namespace Ethereum.Difficulty.Test
 {
-    [Parallelizable(ParallelScope.None)]
+    [Parallelizable(ParallelScope.All)]
     public class DifficultyConstantinopleTests : TestsBase
     {
         public static IEnumerable<DifficultyTests> LoadFrontierTests()

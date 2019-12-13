@@ -16,17 +16,15 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Core.Specs.Forks;
 
 namespace Nethermind.Core.Specs
 {
     public class MainNetSpecProvider : ISpecProvider
-    {   
-        public IReleaseSpec CurrentSpec => Byzantium.Instance;
-
+    {
         public IReleaseSpec GenesisSpec => Frontier.Instance;
 
-        public IReleaseSpec GetSpec(UInt256 blockNumber)
+        public IReleaseSpec GetSpec(long blockNumber)
         {
             if (blockNumber < HomesteadBlockNumber)
             {
@@ -52,29 +50,34 @@ namespace Nethermind.Core.Specs
             {
                 return SpuriousDragon.Instance;
             }
-            
-            if (blockNumber < ConstantinopleBlockNumber)
+
+            if (blockNumber < ConstantinopleFixBlockNumber)
             {
                 return Byzantium.Instance;
             }
+            
+            if (blockNumber < IstanbulBlockNumber)
+            {
+                return ConstantinopleFix.Instance;
+            }
 
-
-            return Constantinople.Instance;
+            return Istanbul.Instance;
         }
 
-        public static UInt256 HomesteadBlockNumber { get; } = 1150000;
-        public UInt256? DaoBlockNumber { get; } = 1920000;
-        public static UInt256 TangerineWhistleBlockNumber { get; } = 2463000;
-        public static UInt256 SpuriousDragonBlockNumber { get; } = 2675000;
-        public static UInt256 ByzantiumBlockNumber { get; } = 4370000;
-        public static UInt256 ConstantinopleBlockNumber { get; } = 100000000; // no constantinople set yet - just for tests
-        
+        public static long HomesteadBlockNumber { get; } = 1150000;
+        public long? DaoBlockNumber { get; } = 1920000;
+        public static long TangerineWhistleBlockNumber { get; } = 2463000;
+        public static long SpuriousDragonBlockNumber { get; } = 2675000;
+        public static long ByzantiumBlockNumber { get; } = 4370000;
+        public static long ConstantinopleFixBlockNumber { get; } = 7280000;
+        public static long IstanbulBlockNumber { get; } = 10000000;
+
         public int ChainId => 1;
-        
+
         private MainNetSpecProvider()
         {
         }
-        
+
         public static MainNetSpecProvider Instance = new MainNetSpecProvider();
     }
 }

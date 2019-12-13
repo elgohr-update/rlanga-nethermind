@@ -16,28 +16,36 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace Nethermind.Core.Encoding
 {
     public class ChainLevelDecoder : IRlpDecoder<ChainLevelInfo>
     {
-        public ChainLevelInfo Decode(Rlp.DecoderContext context, RlpBehaviors rlpBehaviors = RlpBehaviors.None)
+        public ChainLevelInfo Decode(RlpStream rlpStream, RlpBehaviors rlpBehaviors = RlpBehaviors.None)
         {
-            int lastCheck = context.ReadSequenceLength() + context.Position;
-            bool hasMainChainBlock = context.DecodeBool();
+            if (rlpStream.IsNextItemNull())
+            {
+                return null;
+            }
+            
+            int lastCheck = rlpStream.ReadSequenceLength() + rlpStream.Position;
+            bool hasMainChainBlock = rlpStream.DecodeBool();
 
             List<BlockInfo> blockInfos = new List<BlockInfo>();
 
-            context.ReadSequenceLength();
-            while (context.Position < lastCheck)
+            rlpStream.ReadSequenceLength();
+            while (rlpStream.Position < lastCheck)
             {
-                blockInfos.Add(Rlp.Decode<BlockInfo>(context, RlpBehaviors.AllowExtraData));
+                blockInfos.Add(Rlp.Decode<BlockInfo>(rlpStream, RlpBehaviors.AllowExtraData));
             }
 
             if (!rlpBehaviors.HasFlag(RlpBehaviors.AllowExtraData))
             {
-                context.Check(lastCheck);
+                rlpStream.Check(lastCheck);
             }
 
             ChainLevelInfo info = new ChainLevelInfo(hasMainChainBlock, blockInfos.ToArray());
@@ -46,10 +54,34 @@ namespace Nethermind.Core.Encoding
 
         public Rlp Encode(ChainLevelInfo item, RlpBehaviors rlpBehaviors = RlpBehaviors.None)
         {
+            if (item == null)
+            {
+                return Rlp.OfEmptySequence;
+            }
+            
             Rlp[] elements = new Rlp[2];
             elements[0] = Rlp.Encode(item.HasBlockOnMainChain);
             elements[1] = Rlp.Encode(item.BlockInfos);
-            return Rlp.Encode(elements);
+
+            if (item.BlockInfos.Any(bi => bi == null))
+            {
+                throw new InvalidOperationException($"{nameof(BlockInfo)} is null when encoding {nameof(ChainLevelInfo)}");
+            }
+            
+            Rlp rlp = Rlp.Encode(elements);
+            
+            
+            return rlp;
+        }
+
+        public void Encode(MemoryStream stream, ChainLevelInfo item, RlpBehaviors rlpBehaviors = RlpBehaviors.None)
+        {
+            throw new System.NotImplementedException();
+        }
+
+        public int GetLength(ChainLevelInfo item, RlpBehaviors rlpBehaviors)
+        {
+            throw new System.NotImplementedException();
         }
     }
 }

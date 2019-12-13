@@ -28,8 +28,9 @@ namespace Nethermind.Store
         }
 
         private static NullDb _instance;
-        
         public static NullDb Instance => LazyInitializer.EnsureInitialized(ref _instance, () => new NullDb());
+
+        public string Name { get; } = "NullDb";
 
         public byte[] this[byte[] key]
         {
@@ -40,6 +41,11 @@ namespace Nethermind.Store
         public void Remove(byte[] key)
         {
             throw new System.NotSupportedException();
+        }
+
+        public bool KeyExists(byte[] key)
+        {
+            return false;
         }
 
         public byte[][] GetAll()

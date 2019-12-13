@@ -17,6 +17,7 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
@@ -32,12 +33,13 @@ namespace Nethermind.Evm
         {
             private readonly int _capacity;
 
-            public StackPool(int capacity = VirtualMachine.MaxCallDepth * 2) // TODO: we have wrong call depth calculation somehwere
+            // TODO: we have wrong call depth calculation somewhere
+            public StackPool(int capacity = VirtualMachine.MaxCallDepth * 2)
             {
                 _capacity = capacity;
             }
 
-            private readonly Stack<byte[]> _bytesOnStackPool = new Stack<byte[]>();
+            private readonly ConcurrentStack<byte[]> _bytesOnStackPool = new ConcurrentStack<byte[]>();
 
             private int _bytesOnStackCreated;
 
@@ -50,7 +52,7 @@ namespace Nethermind.Evm
             {
                 if (_bytesOnStackPool.Count == 0)
                 {
-                    _bytesOnStackCreated++;
+                    Interlocked.Increment(ref _bytesOnStackCreated);
                     if (_bytesOnStackCreated > _capacity)
                     {
                         throw new Exception();
@@ -59,11 +61,12 @@ namespace Nethermind.Evm
                     _bytesOnStackPool.Push(new byte[VirtualMachine.MaxStackSize * 32]);
                 }
 
-                return _bytesOnStackPool.Pop();
+                _bytesOnStackPool.TryPop(out byte[] result);
+                return result;
             }
         }
 
-        private static readonly StackPool _stackPool = new StackPool();
+        private static readonly ThreadLocal<StackPool> _stackPool = new ThreadLocal<StackPool>(() => new StackPool());
 
         public byte[] BytesOnStack;
 
@@ -71,8 +74,8 @@ namespace Nethermind.Evm
         private List<LogEntry> _logs;
         public int StackHead = 0;
 
-        public EvmState(long gasAvailable, ExecutionEnvironment env, ExecutionType executionType, bool isContinuation)
-            : this(gasAvailable, env, executionType, -1, -1, 0L, 0L, false, isContinuation)
+        public EvmState(long gasAvailable, ExecutionEnvironment env, ExecutionType executionType, bool isPrecompile, bool isTopLevel, bool isContinuation)
+            : this(gasAvailable, env, executionType, isPrecompile, isTopLevel, -1, -1, 0L, 0L, false, isContinuation)
         {
             GasAvailable = gasAvailable;
             Env = env;
@@ -82,6 +85,8 @@ namespace Nethermind.Evm
             long gasAvailable,
             ExecutionEnvironment env,
             ExecutionType executionType,
+            bool isPrecompile,
+            bool isTopLevel,
             int stateSnapshot,
             int storageSnapshot,
             long outputDestination,
@@ -91,6 +96,8 @@ namespace Nethermind.Evm
         {
             GasAvailable = gasAvailable;
             ExecutionType = executionType;
+            IsPrecompile = isPrecompile;
+            IsTopLevel = isTopLevel;
             StateSnapshot = stateSnapshot;
             StorageSnapshot = storageSnapshot;
             Env = env;
@@ -100,11 +107,36 @@ namespace Nethermind.Evm
             IsContinuation = isContinuation;
         }
 
+        public Address From
+        {
+            get
+            {
+                switch (ExecutionType)
+                {
+                    
+                    case ExecutionType.StaticCall:
+                    case ExecutionType.Call:
+                    case ExecutionType.CallCode:
+                    case ExecutionType.Create:
+                        return Env.Sender;
+                    case ExecutionType.DelegateCall:
+                        return Env.ExecutingAccount;
+                    case ExecutionType.Transaction:
+                        return Env.Originator;
+                    default:
+                        throw new ArgumentOutOfRangeException();
+                }
+            }
+        }
+
+        public Address To => Env.CodeSource;
+        
         public ExecutionEnvironment Env { get; }
         public long GasAvailable { get; set; }
-        public UInt256 ProgramCounter { get; set; }
-
+        public int ProgramCounter { get; set; }
         internal ExecutionType ExecutionType { get; }
+        internal bool IsPrecompile { get; }
+        public bool IsTopLevel { get; }
         internal long OutputDestination { get; }
         internal long OutputLength { get; }
         public bool IsStatic { get; }
@@ -126,7 +158,7 @@ namespace Nethermind.Evm
 
         public void Dispose()
         {
-            if (BytesOnStack != null) _stackPool.ReturnBytesOnStack(BytesOnStack);
+            if (BytesOnStack != null) _stackPool.Value.ReturnBytesOnStack(BytesOnStack);
             Memory?.Dispose();
         }
 
@@ -135,7 +167,7 @@ namespace Nethermind.Evm
             if (BytesOnStack == null)
             {
                 Memory = new EvmPooledMemory();
-                BytesOnStack = _stackPool.RentBytesOnStack();
+                BytesOnStack = _stackPool.Value.RentBytesOnStack();
             }
         }
     }

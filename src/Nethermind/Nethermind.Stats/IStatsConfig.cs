@@ -26,15 +26,15 @@ namespace Nethermind.Stats
         /// <summary>
         /// Whether we should capture Node Stats events history
         /// </summary>
-        bool CaptureNodeStatsEventHistory { get; }
+        bool CaptureNodeStatsEventHistory { get; set; }
 
         /// <summary>
         /// Whether we should capture Node Latency Stats events history
         /// </summary>
-        bool CaptureNodeLatencyStatsEventHistory { get; }
+        bool CaptureNodeLatencyStatsEventHistory { get; set; }
 
         /// <summary>
-        /// Value of predefied reputation for trusted nodes
+        /// Value of predefined reputation for trusted nodes
         /// </summary>
         long PredefinedReputation { get; }
 
@@ -52,5 +52,15 @@ namespace Nethermind.Stats
         /// Time within which we penalized peer if disconnection happends due to too many peers
         /// </summary>
         long PenalizedReputationTooManyPeersTimeout { get; }
+        
+        /// <summary>
+        /// Failed connection delays - last entry is used for all further events
+        /// </summary>
+        int[] FailedConnectionDelays { get; }
+        
+        /// <summary>
+        /// Disconnect delays - last entry is used for all further events
+        /// </summary>
+        int[] DisconnectDelays { get; }
     }
 }

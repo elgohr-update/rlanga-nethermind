@@ -16,22 +16,16 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-
-using System;
-using System.Numerics;
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Core.Specs.Forks;
 
 namespace Nethermind.Core.Specs
 {
     public class RinkebySpecProvider : ISpecProvider
     {
-        public IReleaseSpec CurrentSpec => Byzantium.Instance;
-
         public IReleaseSpec GenesisSpec => TangerineWhistle.Instance;
 
-        public IReleaseSpec GetSpec(UInt256 blockNumber)
+        public IReleaseSpec GetSpec(long blockNumber)
         {
-            // TODO: this is not covered by test at the moment
             if (blockNumber < SpuriousDragonBlockNumber)
             {
                 return TangerineWhistle.Instance;
@@ -42,15 +36,34 @@ namespace Nethermind.Core.Specs
                 return SpuriousDragon.Instance;
             }
             
-            return Byzantium.Instance;
+            if (blockNumber < ConstantinopleBlockNumber)
+            {
+                return Byzantium.Instance;
+            }
+            
+            if (blockNumber < ConstantinopleFixBlockNumber)
+            {
+                return Constantinople.Instance;
+            }
+            
+            if (blockNumber < IstanbulBlockNumber)
+            {
+                return ConstantinopleFix.Instance;
+            }
+            
+            return Istanbul.Instance;
         }
 
-        public UInt256? DaoBlockNumber { get; } = null;
-        public static UInt256 SpuriousDragonBlockNumber { get; } = 3;
-        public static UInt256 ByzantiumBlockNumber { get; } = 1035301;
+        public long? DaoBlockNumber { get; } = null;
+
+        public static long SpuriousDragonBlockNumber { get; } = 3;
+        public static long ByzantiumBlockNumber { get; } = 1035301;
+        public static long ConstantinopleBlockNumber { get; } = 3660663;
+        public static long ConstantinopleFixBlockNumber { get; } = 4321234;
+        public static long IstanbulBlockNumber { get; } = 10000000;
         
         public int ChainId => 4;
-
+        
         private RinkebySpecProvider()
         {
         }

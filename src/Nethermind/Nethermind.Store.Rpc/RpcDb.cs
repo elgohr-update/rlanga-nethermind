@@ -19,9 +19,9 @@
 using System;
 using Nethermind.Core;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
+using Nethermind.JsonRpc;
 using Nethermind.JsonRpc.Client;
-using Nethermind.JsonRpc.DataModel;
+using Nethermind.Logging;
 
 namespace Nethermind.Store.Rpc
 {
@@ -50,6 +50,8 @@ namespace Nethermind.Store.Rpc
             }
         }
 
+        public string Name { get; } = "RpcDb";
+
         public byte[] this[byte[] key]
         {
             get => GetThroughRpc(key);
@@ -59,6 +61,11 @@ namespace Nethermind.Store.Rpc
         public void Remove(byte[] key)
         {
             throw new InvalidOperationException("RPC DB does not support writes");
+        }
+
+        public bool KeyExists(byte[] key)
+        {
+            return GetThroughRpc(key) != null;
         }
 
         public byte[][] GetAll() => _recordDb.GetAll();

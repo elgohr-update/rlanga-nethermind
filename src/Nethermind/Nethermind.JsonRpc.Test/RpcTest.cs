@@ -16,12 +16,14 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System.Collections.Generic;
 using System.Linq;
-using Nethermind.Config;
-using Nethermind.Core.Logging;
-using Nethermind.JsonRpc.DataModel;
-using Nethermind.JsonRpc.Module;
-using NSubstitute;
+using Nethermind.JsonRpc.Modules;
+using Nethermind.JsonRpc.Test.Modules;
+using Nethermind.Logging;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
+using NUnit.Framework;
 
 namespace Nethermind.JsonRpc.Test
 {
@@ -30,14 +32,33 @@ namespace Nethermind.JsonRpc.Test
         public static JsonRpcResponse TestRequest<T>(T module, string method, params string[] parameters) where T : class, IModule
         {
             IJsonRpcService service = BuildRpcService<T>(module);
-            JsonRpcRequest request = GetJsonRequest("debug_getFromDb", parameters);
-            return service.SendRequest(request);
+            JsonRpcRequest request = GetJsonRequest(method, parameters);
+            return service.SendRequestAsync(request).Result;
+        }
+        
+        public static string TestSerializedRequest<T>(IReadOnlyCollection<JsonConverter> converters, T module, string method, params string[] parameters) where T : class, IModule
+        {
+            IJsonRpcService service = BuildRpcService(module);
+            JsonRpcRequest request = GetJsonRequest(method, parameters);
+            JsonRpcResponse response = service.SendRequestAsync(request).Result;
+            JsonSerializerSettings settings = new JsonSerializerSettings();
+            settings.ContractResolver = new CamelCasePropertyNamesContractResolver();
+            settings.Converters = service.Converters.Union(converters).ToArray();
+            string serialized = JsonConvert.SerializeObject(response, settings);
+            TestContext.WriteLine(serialized.Replace("\"", "\\\""));
+            return serialized;
+        }
+        
+        public static string TestSerializedRequest<T>(T module, string method, params string[] parameters) where T : class, IModule
+        {
+            return TestSerializedRequest(new JsonConverter[0], module, method, parameters);
         }
         
         public static IJsonRpcService BuildRpcService<T>(T module) where T : class, IModule
         {
-            var moduleProvider = new TestModuleProvider<T>(module);
-            IJsonRpcService service = new JsonRpcService(moduleProvider, Substitute.For<IConfigProvider>(), NullLogManager.Instance);
+            var moduleProvider = new TestRpcModuleProvider<T>(module);
+            moduleProvider.Register(new SingletonModulePool<T>(new SingletonFactory<T>(module)));
+            IJsonRpcService service = new JsonRpcService(moduleProvider, NullLogManager.Instance);
             return service;
         }
         
@@ -51,7 +72,7 @@ namespace Nethermind.JsonRpc.Test
         {
             var request = new JsonRpcRequest()
             {
-                Jsonrpc = "2.0",
+                JsonRpc = "2.0",
                 Method = method,
                 Params = parameters?.ToArray() ?? new string[0],
                 Id = 67

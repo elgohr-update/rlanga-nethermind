@@ -16,6 +16,7 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using Nethermind.Blockchain.Rewards;
 using Nethermind.Core;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
@@ -59,7 +60,7 @@ namespace Nethermind.Blockchain.Test
         [Test]
         public void No_uncles()
         {
-            Block block = Build.A.Block.WithNumber(3).WithOmmers().TestObject;
+            Block block = Build.A.Block.WithNumber(3).TestObject;
             
             RewardCalculator calculator = new RewardCalculator(RopstenSpecProvider.Instance);
             BlockReward[] rewards = calculator.CalculateRewards(block);
@@ -71,7 +72,7 @@ namespace Nethermind.Blockchain.Test
         [Test]
         public void Byzantium_reward_two_uncles()
         {
-            UInt256 blockNumber = RopstenSpecProvider.ByzantiumBlockNumber;
+            long blockNumber = RopstenSpecProvider.ByzantiumBlockNumber;
             Block ommer = Build.A.Block.WithNumber(blockNumber - 2).TestObject;
             Block ommer2 = Build.A.Block.WithNumber(blockNumber - 2).TestObject;
             Block block = Build.A.Block.WithNumber(blockNumber).WithOmmers(ommer, ommer2).TestObject;
@@ -88,7 +89,7 @@ namespace Nethermind.Blockchain.Test
         [Test]
         public void Constantinople_reward_two_uncles()
         {
-            UInt256 blockNumber = RopstenSpecProvider.ConstantinopleBlockNumber;
+            long blockNumber = RopstenSpecProvider.ConstantinopleBlockNumber;
             Block ommer = Build.A.Block.WithNumber(blockNumber - 2).TestObject;
             Block ommer2 = Build.A.Block.WithNumber(blockNumber - 2).TestObject;
             Block block = Build.A.Block.WithNumber(blockNumber).WithOmmers(ommer, ommer2).TestObject;

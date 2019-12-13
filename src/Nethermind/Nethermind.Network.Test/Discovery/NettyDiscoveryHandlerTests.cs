@@ -27,8 +27,8 @@ using DotNetty.Transport.Channels;
 using DotNetty.Transport.Channels.Sockets;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Test.Builders;
+using Nethermind.Logging;
 using Nethermind.Network.Discovery;
 using Nethermind.Network.Discovery.Messages;
 using Nethermind.Network.Discovery.RoutingTable;
@@ -47,8 +47,8 @@ namespace Nethermind.Network.Test.Discovery
         private List<IChannel> _channels;
         private List<NettyDiscoveryHandler> _discoveryHandlers;
         private List<IDiscoveryManager> _discoveryManagers;
-        private readonly IPEndPoint _address = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 10001);
-        private readonly IPEndPoint _address2 = new IPEndPoint(IPAddress.Parse("127.0.0.1"), 10002);
+        private readonly IPEndPoint _address = new IPEndPoint(IPAddress.Loopback, 10001);
+        private readonly IPEndPoint _address2 = new IPEndPoint(IPAddress.Loopback, 10002);
         private int _channelActivatedCounter;
 
         [SetUp]
@@ -91,7 +91,7 @@ namespace Nethermind.Network.Test.Discovery
                 SourceAddress = _address,
                 DestinationAddress = _address2,
                 Version = 4,
-                ExpirationTime = 100,
+                ExpirationTime = (long)(new Timestamper().EpochSeconds + 1200),
                 FarPublicKey = _privateKey2.PublicKey
             };
             _discoveryHandlers[0].SendMessage(msg);
@@ -104,7 +104,7 @@ namespace Nethermind.Network.Test.Discovery
                 SourceAddress = _address2,
                 DestinationAddress = _address,
                 Version = 4,
-                ExpirationTime = 100,
+                ExpirationTime = (long)(new Timestamper().EpochSeconds + 1200),
                 FarPublicKey = _privateKey.PublicKey
             };
             _discoveryHandlers[1].SendMessage(msg2);
@@ -119,7 +119,7 @@ namespace Nethermind.Network.Test.Discovery
             {
                 FarAddress = _address2,
                 PingMdc = new byte[] {1,2,3},
-                ExpirationTime = 100,
+                ExpirationTime = (long)(new Timestamper().EpochSeconds + 1200),
                 FarPublicKey = _privateKey2.PublicKey
             };
             _discoveryHandlers[0].SendMessage(msg);
@@ -130,7 +130,7 @@ namespace Nethermind.Network.Test.Discovery
             {
                 FarAddress = _address,
                 PingMdc = new byte[] { 1, 2, 3 },
-                ExpirationTime = 100,
+                ExpirationTime = (long)(new Timestamper().EpochSeconds + 1200),
                 FarPublicKey = _privateKey.PublicKey
             };
             _discoveryHandlers[1].SendMessage(msg2);
@@ -145,7 +145,7 @@ namespace Nethermind.Network.Test.Discovery
             {
                 FarAddress = _address2,
                 SearchedNodeId = new byte[] { 1, 2, 3 },
-                ExpirationTime = 100,
+                ExpirationTime = (long)(new Timestamper().EpochSeconds + 1200),
                 FarPublicKey = _privateKey2.PublicKey
             };
             _discoveryHandlers[0].SendMessage(msg);
@@ -156,7 +156,7 @@ namespace Nethermind.Network.Test.Discovery
             {
                 FarAddress = _address,
                 SearchedNodeId = new byte[] { 1, 2, 3 },
-                ExpirationTime = 100,
+                ExpirationTime = (long)(new Timestamper().EpochSeconds + 1200),
                 FarPublicKey = _privateKey.PublicKey
             };
             _discoveryHandlers[1].SendMessage(msg2);
@@ -171,7 +171,7 @@ namespace Nethermind.Network.Test.Discovery
             {
                 FarAddress = _address2,
                 Nodes = new List<Node>().ToArray(),
-                ExpirationTime = 100,
+                ExpirationTime = (long)(new Timestamper().EpochSeconds + 1200),
                 FarPublicKey = _privateKey2.PublicKey
             };
             _discoveryHandlers[0].SendMessage(msg);
@@ -182,7 +182,7 @@ namespace Nethermind.Network.Test.Discovery
             {
                 FarAddress = _address,
                 Nodes = new List<Node>().ToArray(),
-                ExpirationTime = 100,
+                ExpirationTime = (long)(new Timestamper().EpochSeconds + 1200),
                 FarPublicKey = _privateKey.PublicKey
             };
             _discoveryHandlers[1].SendMessage(msg2);
@@ -205,7 +205,7 @@ namespace Nethermind.Network.Test.Discovery
 
         private void InitializeChannel(IDatagramChannel channel, IDiscoveryManager discoveryManager, IMessageSerializationService service)
         {
-            var handler = new NettyDiscoveryHandler(discoveryManager, channel, service, NullLogManager.Instance);
+            var handler = new NettyDiscoveryHandler(discoveryManager, channel, service, new Timestamper(), NullLogManager.Instance);
             handler.OnChannelActivated += (x, y) =>
             {
                 _channelActivatedCounter++;

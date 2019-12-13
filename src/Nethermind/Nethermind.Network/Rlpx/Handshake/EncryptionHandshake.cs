@@ -17,7 +17,6 @@
  */
 
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Model;
 
 namespace Nethermind.Network.Rlpx.Handshake
 {
@@ -26,7 +25,7 @@ namespace Nethermind.Network.Rlpx.Handshake
         public EncryptionSecrets Secrets { get; set; }
         public byte[] InitiatorNonce { get; set; }
         public byte[] RecipientNonce { get; set; }
-        public NodeId RemoteNodeId { get; set; }
+        public PublicKey RemoteNodeId { get; set; }
         public PublicKey RemoteEphemeralPublicKey { get; set; }
         public PrivateKey EphemeralPrivateKey { get; set; }
         

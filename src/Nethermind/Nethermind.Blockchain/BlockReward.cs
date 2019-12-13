@@ -23,13 +23,15 @@ namespace Nethermind.Blockchain
 {
     public class BlockReward
     {
-        public BlockReward(Address address, BigInteger value)
+        public BlockReward(Address address, BigInteger value, BlockRewardType rewardType = BlockRewardType.Block)
         {
             Address = address;
             Value = value;
+            RewardType = rewardType;
         }
         
         public Address Address { get; }
         public BigInteger Value { get; }
+        public BlockRewardType RewardType { get; }
     }
 }

@@ -19,8 +19,8 @@
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
+using Nethermind.Logging;
 
 namespace Nethermind.Evm.Precompiles
 {
@@ -34,20 +34,22 @@ namespace Nethermind.Evm.Precompiles
 
         public Address Address { get; } = Address.FromNumber(1);
 
-        public long DataGasCost(byte[] inputData)
+        public long DataGasCost(byte[] inputData, IReleaseSpec releaseSpec)
         {
             return 0L;
         }
 
-        public long BaseGasCost()
+        public long BaseGasCost(IReleaseSpec releaseSpec)
         {
             return 3000L;
         }
 
-        private readonly EthereumSigner _signer = new EthereumSigner(OlympicSpecProvider.Instance, NullLogManager.Instance);
+        private readonly EthereumEcdsa _ecdsa = new EthereumEcdsa(OlympicSpecProvider.Instance, NullLogManager.Instance);
         
         public (byte[], bool) Run(byte[] inputData)
         {
+            Metrics.EcRecoverPrecompile++;
+            
             inputData = (inputData ?? Bytes.Empty).PadRight(128);
 
             Keccak hash = new Keccak(inputData.Slice(0, 32));
@@ -72,7 +74,7 @@ namespace Nethermind.Evm.Precompiles
             }
 
             Signature signature = new Signature(r, s, v);
-            Address recovered = _signer.RecoverAddress(signature, hash);
+            Address recovered = _ecdsa.RecoverAddress(signature, hash);
             if (recovered == null)
             {
                 return (Bytes.Empty, true);

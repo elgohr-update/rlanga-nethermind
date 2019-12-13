@@ -21,7 +21,8 @@ using System.IO;
 using System.Linq;
 using Nethermind.Config;
 using Nethermind.Core;
-using Nethermind.Core.Logging;
+using Nethermind.Db;
+using Nethermind.Logging;
 using Nethermind.Network.Config;
 using Nethermind.Network.Discovery.Lifecycle;
 using Nethermind.Network.Discovery.RoutingTable;
@@ -35,21 +36,19 @@ namespace Nethermind.Network.Test
     [TestFixture]
     public class NetworkStorageTests
     {
-        private INetworkConfig _networkConfig;
         private IStatsConfig _statsConfig;
 
         [SetUp]
         public void SetUp()
         {
+            NetworkNodeDecoder.Init();
             NullLogManager logManager = NullLogManager.Instance;
-            JsonConfigProvider configProvider = new JsonConfigProvider();
+            ConfigProvider configSource = new ConfigProvider();
             _tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-            _networkConfig = configProvider.GetConfig<INetworkConfig>();
-            _networkConfig.DbBasePath = _tempDir;
-            _statsConfig = configProvider.GetConfig<IStatsConfig>();
+            _statsConfig = configSource.GetConfig<IStatsConfig>();
 
-            _nodeFactory = new NodeFactory();
-            _storage = new NetworkStorage("test", _networkConfig, logManager, new PerfService(logManager));
+            var db = new SimpleFilePublicKeyDb("Test",_tempDir, logManager);
+            _storage = new NetworkStorage(db, logManager);
         }
         
         [TearDown]
@@ -63,13 +62,12 @@ namespace Nethermind.Network.Test
 
         private string _tempDir;
         private INetworkStorage _storage;
-        private INodeFactory _nodeFactory;
 
         private INodeLifecycleManager CreateLifecycleManager(Node node)
         {
             INodeLifecycleManager manager = Substitute.For<INodeLifecycleManager>();
             manager.ManagedNode.Returns(node);
-            manager.NodeStats.Returns(new NodeStats(node, _statsConfig, NullLogManager.Instance)
+            manager.NodeStats.Returns(new NodeStatsLight(node, _statsConfig)
             {
                 CurrentPersistedNodeReputation = node.Port
             });
@@ -85,17 +83,15 @@ namespace Nethermind.Network.Test
 
             var nodes = new[]
             {
-                _nodeFactory.CreateNode("192.1.1.1", 3441),
-                _nodeFactory.CreateNode("192.1.1.2", 3442),
-                _nodeFactory.CreateNode("192.1.1.3", 3443),
-                _nodeFactory.CreateNode("192.1.1.4", 3444),
-                _nodeFactory.CreateNode("192.1.1.5", 3445)
+                new Node("192.1.1.1", 3441),
+                new Node("192.1.1.2", 3442),
+                new Node("192.1.1.3", 3443),
+                new Node("192.1.1.4", 3444),
+                new Node("192.1.1.5", 3445)
             };
-            nodes[0].Description = "Test desc";
-            nodes[4].Description = "Test desc 2";
 
             var managers = nodes.Select(CreateLifecycleManager).ToArray();
-            var networkNodes = managers.Select(x => new NetworkNode(x.ManagedNode.Id.PublicKey, x.ManagedNode.Host, x.ManagedNode.Port, x.ManagedNode.Description, x.NodeStats.NewPersistedNodeReputation)).ToArray();
+            var networkNodes = managers.Select(x => new NetworkNode(x.ManagedNode.Id, x.ManagedNode.Host, x.ManagedNode.Port, x.NodeStats.NewPersistedNodeReputation)).ToArray();
 
 
             _storage.StartBatch();
@@ -109,7 +105,6 @@ namespace Nethermind.Network.Test
                 Assert.IsNotNull(persistedNode);
                 Assert.AreEqual(manager.ManagedNode.Port, persistedNode.Port);
                 Assert.AreEqual(manager.ManagedNode.Host, persistedNode.Host);
-                Assert.AreEqual(manager.ManagedNode.Description, persistedNode.Description);
                 Assert.AreEqual(manager.NodeStats.CurrentNodeReputation, persistedNode.Reputation);
             }
 
@@ -130,7 +125,6 @@ namespace Nethermind.Network.Test
                 Assert.IsNotNull(persistedNode);
                 Assert.AreEqual(manager.ManagedNode.Port, persistedNode.Port);
                 Assert.AreEqual(manager.ManagedNode.Host, persistedNode.Host);
-                Assert.AreEqual(manager.ManagedNode.Description, persistedNode.Description);
                 Assert.AreEqual(manager.NodeStats.CurrentNodeReputation, persistedNode.Reputation);
             }
         }
@@ -143,16 +137,14 @@ namespace Nethermind.Network.Test
 
             var nodes = new[]
             {
-                _nodeFactory.CreateNode("192.1.1.1", 3441),
-                _nodeFactory.CreateNode("192.1.1.2", 3442),
-                _nodeFactory.CreateNode("192.1.1.3", 3443),
-                _nodeFactory.CreateNode("192.1.1.4", 3444),
-                _nodeFactory.CreateNode("192.1.1.5", 3445)
+                new Node("192.1.1.1", 3441),
+                new Node("192.1.1.2", 3442),
+                new Node("192.1.1.3", 3443),
+                new Node("192.1.1.4", 3444),
+                new Node("192.1.1.5", 3445)
             };
-            nodes[0].Description = "Test desc";
-            nodes[4].Description = "Test desc 2";
 
-            var peers = nodes.Select(x => new NetworkNode(x.Id.PublicKey, x.Host, x.Port, x.Description, 0L)).ToArray();
+            var peers = nodes.Select(x => new NetworkNode(x.Id, x.Host, x.Port, 0L)).ToArray();
 
             _storage.StartBatch();
             _storage.UpdateNodes(peers);
@@ -165,7 +157,6 @@ namespace Nethermind.Network.Test
                 Assert.IsNotNull(persistedNode);
                 Assert.AreEqual(peer.Port, persistedNode.Port);
                 Assert.AreEqual(peer.Host, persistedNode.Host);
-                Assert.AreEqual(peer.Description, persistedNode.Description);
                 Assert.AreEqual(peer.Reputation, persistedNode.Reputation);
             }
 
@@ -186,7 +177,6 @@ namespace Nethermind.Network.Test
                 Assert.IsNotNull(persistedNode);
                 Assert.AreEqual(peer.Port, persistedNode.Port);
                 Assert.AreEqual(peer.Host, persistedNode.Host);
-                Assert.AreEqual(peer.Description, persistedNode.Description);
                 Assert.AreEqual(peer.Reputation, persistedNode.Reputation);
             }
         }

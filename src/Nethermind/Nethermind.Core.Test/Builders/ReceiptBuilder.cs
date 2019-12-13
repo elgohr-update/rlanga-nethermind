@@ -21,26 +21,28 @@ using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Core.Test.Builders
 {
-    public class ReceiptBuilder : BuilderBase<TransactionReceipt>
+    public class ReceiptBuilder : BuilderBase<TxReceipt>
     {
         public ReceiptBuilder()
         {
-            TestObjectInternal = new TransactionReceipt();
+            TestObjectInternal = new TxReceipt();
             TestObjectInternal.Logs = new[] {new LogEntry(Address.Zero, new byte[0], new[] {Keccak.Zero}),};
         }
 
-        public ReceiptBuilder WithAllFieldsFilled => WithBloom(Test.Builders.TestObject.NonZeroBloom)
+        public ReceiptBuilder WithAllFieldsFilled => WithBloom(Test.Builders.TestItem.NonZeroBloom)
             .WithError("error")
             .WithIndex(2)
-            .WithSender(Test.Builders.TestObject.AddressA)
-            .WithRecipient(Test.Builders.TestObject.AddressB)
-            .WithContractAddress(Test.Builders.TestObject.AddressC)
+            .WithSender(Test.Builders.TestItem.AddressA)
+            .WithRecipient(Test.Builders.TestItem.AddressB)
+            .WithContractAddress(Test.Builders.TestItem.AddressC)
             .WithGasUsed(100)
-            .WithTransactionHash(Builders.TestObject.KeccakA)
-            .WithState(Builders.TestObject.KeccakB)
-            .WithBlockHash(Builders.TestObject.KeccakC)
+            .WithTransactionHash(Builders.TestItem.KeccakA)
+            .WithState(Builders.TestItem.KeccakB)
+            .WithBlockHash(Builders.TestItem.KeccakC)
             .WithBlockNumber(2)
-            .WithGasUsedTotal(1000);
+            .WithBloom(Bloom.Empty)
+            .WithGasUsedTotal(1000)
+            .WithStatusCode(1);
 
         public ReceiptBuilder WithState(Keccak state)
         {
@@ -56,11 +58,11 @@ namespace Nethermind.Core.Test.Builders
 
         public ReceiptBuilder WithTransactionHash(Keccak hash)
         {
-            TestObject.TransactionHash = hash;
+            TestObject.TxHash = hash;
             return this;
         }
 
-        public ReceiptBuilder WithBlockNumber(UInt256 number)
+        public ReceiptBuilder WithBlockNumber(long number)
         {
             TestObject.BlockNumber = number;
             return this;
@@ -117,6 +119,12 @@ namespace Nethermind.Core.Test.Builders
         public ReceiptBuilder WithRecipient(Address recipient)
         {
             TestObjectInternal.Recipient = recipient;
+            return this;
+        }
+        
+        public ReceiptBuilder WithStatusCode(byte statusCode)
+        {
+            TestObjectInternal.StatusCode = statusCode;
             return this;
         }
     }

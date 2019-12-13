@@ -51,12 +51,27 @@ namespace Nethermind.Blockchain.Test
             _processedValidationResults = processedValidationResults ?? throw new ArgumentNullException(nameof(processedValidationResults));
         }
 
+        public bool ValidateHash(BlockHeader header)
+        {
+            return _alwaysSameResultForSuggested ?? _suggestedValidationResults.Dequeue();
+        }
+
+        public bool ValidateHeader(BlockHeader header, BlockHeader parent, bool isOmmer)
+        {
+            return _alwaysSameResultForSuggested ?? _suggestedValidationResults.Dequeue();
+        }
+
+        public bool ValidateHeader(BlockHeader header, bool isOmmer)
+        {
+            return _alwaysSameResultForSuggested ?? _suggestedValidationResults.Dequeue();
+        }
+
         public bool ValidateSuggestedBlock(Block block)
         {
             return _alwaysSameResultForSuggested ?? _suggestedValidationResults.Dequeue();
         }
 
-        public bool ValidateProcessedBlock(Block processedBlock, Block suggestedBlock)
+        public bool ValidateProcessedBlock(Block processedBlock, TxReceipt[] receipts, Block suggestedBlock)
         {
             return _alwaysSameResultForProcessed ?? _processedValidationResults.Dequeue();
         }

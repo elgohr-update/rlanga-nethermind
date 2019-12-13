@@ -21,10 +21,7 @@ using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Model;
 using Nethermind.Network.Discovery.Messages;
-using Nethermind.Network.Discovery.RoutingTable;
-using Nethermind.Stats;
 using Node = Nethermind.Stats.Model.Node;
 
 namespace Nethermind.Network.Discovery.Serializers
@@ -32,18 +29,15 @@ namespace Nethermind.Network.Discovery.Serializers
     public class NeighborsMessageSerializer : DiscoveryMessageSerializerBase, IMessageSerializer<NeighborsMessage>
     {
         public NeighborsMessageSerializer(
-            ISigner signer,
+            IEcdsa ecdsa,
             IPrivateKeyGenerator privateKeyGenerator,
             IDiscoveryMessageFactory messageFactory,
-            INodeIdResolver nodeIdResolver,
-            INodeFactory nodeFactory) : base(signer, privateKeyGenerator, messageFactory, nodeIdResolver, nodeFactory)
+            INodeIdResolver nodeIdResolver) : base(ecdsa, privateKeyGenerator, messageFactory, nodeIdResolver)
         {
         }
 
         public byte[] Serialize(NeighborsMessage message)
         {
-            byte[] typeBytes = {(byte) message.MessageType};
-
             Rlp[] nodes = null;
             if (message.Nodes != null && message.Nodes.Any())
             {
@@ -51,7 +45,7 @@ namespace Nethermind.Network.Discovery.Serializers
                 for (var i = 0; i < message.Nodes.Length; i++)
                 {
                     var node = message.Nodes[i];
-                    var serializedNode = SerializeNode(node.Address, node.Id.PublicKey.Bytes);
+                    var serializedNode = SerializeNode(node.Address, node.Id.Bytes);
                     nodes[i] = serializedNode;
                 }
             }
@@ -61,7 +55,7 @@ namespace Nethermind.Network.Discovery.Serializers
                 Rlp.Encode(message.ExpirationTime)
             ).Bytes;
 
-            byte[] serializedMsg = Serialize(typeBytes, data);
+            byte[] serializedMsg = Serialize((byte) message.MessageType, data);
             return serializedMsg;
         }
 
@@ -69,7 +63,7 @@ namespace Nethermind.Network.Discovery.Serializers
         {
             var results = PrepareForDeserialization<NeighborsMessage>(msg);
 
-            var rlp = results.Data.AsRlpContext();
+            var rlp = results.Data.AsRlpStream();
             rlp.ReadSequenceLength();
             var nodes = DeserializeNodes(rlp);
 
@@ -81,9 +75,9 @@ namespace Nethermind.Network.Discovery.Serializers
             return message;
         }
 
-        private Node[] DeserializeNodes(Rlp.DecoderContext context)
+        private Node[] DeserializeNodes(RlpStream rlpStream)
         {
-            return context.DecodeArray(ctx =>
+            return rlpStream.DecodeArray(ctx =>
             {
                 int lastPosition = ctx.ReadSequenceLength() + ctx.Position;
                 int count = ctx.ReadNumberOfItemsRemaining(lastPosition);
@@ -96,7 +90,7 @@ namespace Nethermind.Network.Discovery.Serializers
                 }
 
                 byte[] id = ctx.DecodeByteArray();
-                return NodeFactory.CreateNode(new NodeId(new PublicKey(id)), address);
+                return new Node(new PublicKey(id), address);
             });
         }
     }

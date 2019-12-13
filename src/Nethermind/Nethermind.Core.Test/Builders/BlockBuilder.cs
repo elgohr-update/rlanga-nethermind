@@ -37,9 +37,39 @@ namespace Nethermind.Core.Test.Builders
             return this;
         }
         
-        public BlockBuilder WithNumber(UInt256 number)
+        public BlockBuilder WithNumber(long number)
         {
             TestObjectInternal.Header.Number = number;
+            return this;
+        }
+        
+        public BlockBuilder WithExtraData(byte[] extraData)
+        {
+            TestObjectInternal.Header.ExtraData = extraData;
+            return this;
+        }
+        
+        public BlockBuilder WithGasLimit(long gasLimit)
+        {
+            TestObjectInternal.Header.GasLimit = gasLimit;
+            return this;
+        }
+        
+        public BlockBuilder WithTimestamp(UInt256 timestamp)
+        {
+            TestObjectInternal.Header.Timestamp = timestamp;
+            return this;
+        }
+        
+        public BlockBuilder WithTransactions(params Transaction[] transactions)
+        {
+            TestObjectInternal.Body.Transactions = transactions;
+            return this;
+        }
+        
+        public BlockBuilder WithBeneficiary(Address address)
+        {
+            TestObjectInternal.Header.Beneficiary = address;
             return this;
         }
 
@@ -82,13 +112,31 @@ namespace Nethermind.Core.Test.Builders
         
         public BlockBuilder WithOmmers(params Block[] ommers)
         {
-            TestObjectInternal.Ommers = ommers.Select(o => o.Header).ToArray();
+            TestObjectInternal.Body.Ommers = ommers.Select(o => o.Header).ToArray();
+            return this;
+        }
+        
+        public BlockBuilder WithOmmers(params BlockHeader[] ommers)
+        {
+            TestObjectInternal.Body.Ommers = ommers;
             return this;
         }
 
         public BlockBuilder WithParentHash(Keccak parent)
         {
             TestObjectInternal.Header.ParentHash = parent;
+            return this;
+        }
+        
+        public BlockBuilder WithStateRoot(Keccak stateRoot)
+        {
+            TestObjectInternal.Header.StateRoot = stateRoot;
+            return this;
+        }
+        
+        public BlockBuilder WithBloom(Bloom bloom)
+        {
+            TestObjectInternal.Bloom = bloom;
             return this;
         }
 

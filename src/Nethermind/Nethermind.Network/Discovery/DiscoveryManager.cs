@@ -23,46 +23,42 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Nethermind.Config;
 using Nethermind.Core;
+using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
-using Nethermind.Core.Model;
+using Nethermind.Logging;
 using Nethermind.Network.Config;
 using Nethermind.Network.Discovery.Lifecycle;
 using Nethermind.Network.Discovery.Messages;
 using Nethermind.Network.Discovery.RoutingTable;
-using Nethermind.Stats;
 using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.Discovery
 {
     public class DiscoveryManager : IDiscoveryManager
     {
-        private readonly INetworkConfig _configurationProvider;
+        private readonly IDiscoveryConfig _discoveryConfig;
         private readonly ILogger _logger;
-        private readonly INodeFactory _nodeFactory;
         private readonly INodeLifecycleManagerFactory _nodeLifecycleManagerFactory;
-        private readonly ConcurrentDictionary<string, INodeLifecycleManager> _nodeLifecycleManagers = new ConcurrentDictionary<string, INodeLifecycleManager>();
+        private readonly ConcurrentDictionary<Keccak, INodeLifecycleManager> _nodeLifecycleManagers = new ConcurrentDictionary<Keccak, INodeLifecycleManager>();
         private readonly INodeTable _nodeTable;
         private readonly INetworkStorage _discoveryStorage;
 
         private readonly ConcurrentDictionary<MessageTypeKey, TaskCompletionSource<DiscoveryMessage>> _waitingEvents = new ConcurrentDictionary<MessageTypeKey, TaskCompletionSource<DiscoveryMessage>>();
         private IMessageSender _messageSender;
 
-        public DiscoveryManager(INodeLifecycleManagerFactory nodeLifecycleManagerFactory,
-            INodeFactory nodeFactory,
+        public DiscoveryManager(
+            INodeLifecycleManagerFactory nodeLifecycleManagerFactory,
             INodeTable nodeTable,
             INetworkStorage discoveryStorage,
-            IConfigProvider configurationProvider,
+            IDiscoveryConfig discoveryConfig,
             ILogManager logManager)
         {
-            _logger = logManager.GetClassLogger();
-            _configurationProvider = configurationProvider.GetConfig<INetworkConfig>();
-            _nodeLifecycleManagerFactory = nodeLifecycleManagerFactory;
-            _nodeFactory = nodeFactory;
-            _nodeTable = nodeTable;
-            _discoveryStorage = discoveryStorage;
+            _logger = logManager.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
+            _discoveryConfig = discoveryConfig ?? throw new ArgumentNullException(nameof(discoveryConfig));
+            _nodeLifecycleManagerFactory = nodeLifecycleManagerFactory ?? throw new ArgumentNullException(nameof(nodeLifecycleManagerFactory));
+            _nodeTable = nodeTable ?? throw new ArgumentNullException(nameof(nodeTable));
+            _discoveryStorage = discoveryStorage ?? throw new ArgumentNullException(nameof(discoveryStorage));
             _nodeLifecycleManagerFactory.DiscoveryManager = this;
         }
 
@@ -79,7 +75,7 @@ namespace Nethermind.Network.Discovery
 
                 MessageType msgType = message.MessageType;
 
-                Node node = _nodeFactory.CreateNode(new NodeId(message.FarPublicKey), message.FarAddress);
+                Node node = new Node(message.FarPublicKey, message.FarAddress);
                 INodeLifecycleManager nodeManager = GetNodeLifecycleManager(node);
                 if (nodeManager == null)
                 {
@@ -129,12 +125,12 @@ namespace Nethermind.Network.Discovery
                 return null;
             }
 
-            return _nodeLifecycleManagers.GetOrAdd(node.IdHashText, x =>
+            return _nodeLifecycleManagers.GetOrAdd(node.IdHash, x =>
             {
                 var manager = _nodeLifecycleManagerFactory.CreateNodeLifecycleManager(node);
                 if (!isPersisted)
                 {
-                    _discoveryStorage.UpdateNodes(new[] { new NetworkNode(manager.ManagedNode.Id.PublicKey, manager.ManagedNode.Host, manager.ManagedNode.Port, manager.ManagedNode.Description, manager.NodeStats.NewPersistedNodeReputation)});
+                    _discoveryStorage.UpdateNodes(new[] { new NetworkNode(manager.ManagedNode.Id, manager.ManagedNode.Host, manager.ManagedNode.Port, manager.NodeStats.NewPersistedNodeReputation)});
                 }
                 OnNewNode(manager);
                 return manager;
@@ -153,11 +149,19 @@ namespace Nethermind.Network.Discovery
             }
         }
 
-        public async Task<bool> WasMessageReceived(string senderIdHash, MessageType messageType, int timeout)
+        public async Task<bool> WasMessageReceived(Keccak senderIdHash, MessageType messageType, int timeout)
         {
             var completionSource = GetCompletionSource(senderIdHash, (int)messageType);
-            var firstTask = await Task.WhenAny(completionSource.Task, Task.Delay(timeout));
-            return firstTask == completionSource.Task;
+            CancellationTokenSource delayCancellation = new CancellationTokenSource();
+            var firstTask = await Task.WhenAny(completionSource.Task, Task.Delay(timeout, delayCancellation.Token));
+
+            bool result = firstTask == completionSource.Task;
+            if (result)
+            {
+                delayCancellation.Cancel();
+            }
+            
+            return result;
         }
 
         public event EventHandler<NodeEventArgs> NodeDiscovered;
@@ -172,59 +176,64 @@ namespace Nethermind.Network.Discovery
             return _nodeLifecycleManagers.Values.Where(query.Invoke).ToArray();
         }
 
-        protected void ValidatePingAddress(PingMessage message)
+        private void ValidatePingAddress(PingMessage message)
         {
             if (message.DestinationAddress == null || message.SourceAddress == null || message.FarAddress == null)
             {
                 if (_logger.IsWarn)
                 {
-                    _logger.Warn($"Received ping message with empty address, message: {message}");
+                    _logger.Warn($"Received a ping message with empty address, message: {message}");
                 }
             }
 
             if (!Bytes.AreEqual(_nodeTable.MasterNode.Address.Address.GetAddressBytes(), message.DestinationAddress?.Address.GetAddressBytes()))
             {
-                //throw new NetworkingException($"Received message with inccorect destination adress, message: {message}");
+                if (_logger.IsWarn)
+                {
+                    _logger.Warn($"Received a message with incorrect destination address, message: {message}");
+                }
             }
 
-            if (_nodeTable.MasterNode.Port != message.DestinationAddress?.Port)
-            {
-//                throw new NetworkingException($"Received message with inccorect destination port, message: {message}");
-            }
+            // port will be different as we dynamically open ports for each socket connection
+//            if (_nodeTable.MasterNode.Port != message.DestinationAddress?.Port)
+//            {
+//                throw new NetworkingException($"Received message with incorrect destination port, message: {message}");
+//            }
 
-            if (!Bytes.AreEqual(message.FarAddress?.Address.GetAddressBytes(), message.SourceAddress?.Address.GetAddressBytes()))
-            {
-                //throw new NetworkingException($"Received message with inccorect source adress, message: {message}");
-            }
+            // either an old Nethermind or other nodes that make the same mistake 
+//            if (!Bytes.AreEqual(message.FarAddress?.Address.GetAddressBytes(), message.SourceAddress?.Address.GetAddressBytes()))
+//            {
+//                throw new NetworkingException($"Received message with incorrect source address, message: {message}", NetworkExceptionType.Discovery);
+//            }
 
             if (message.FarAddress?.Port != message.SourceAddress?.Port)
             {
                 if (_logger.IsTrace)
                 {
-                    _logger.Warn($"Received message with incorect source port, message: {message}");
+                    _logger.Warn($"Received a message with incorect source port, message: {message}");
                 }
             }
         }
 
         private void OnNewNode(INodeLifecycleManager manager)
         {
-            NodeDiscovered?.Invoke(this, new NodeEventArgs(manager.ManagedNode, manager.NodeStats));
+            NodeDiscovered?.Invoke(this, new NodeEventArgs(manager.ManagedNode));
         }
 
         private void NotifySubscribersOnMsgReceived(MessageType msgType, Node node, DiscoveryMessage message)
         {
-            var completionSource = RemoveCompletionSource(node.IdHashText, (int)msgType);
+            var completionSource = RemoveCompletionSource(node.IdHash, (int)msgType);
             completionSource?.TrySetResult(message);
         }
 
-        private TaskCompletionSource<DiscoveryMessage> GetCompletionSource(string senderAddressHash, int messageType)
+        private TaskCompletionSource<DiscoveryMessage> GetCompletionSource(Keccak senderAddressHash, int messageType)
         {
             var key = new MessageTypeKey(senderAddressHash, messageType);
             var completionSource = _waitingEvents.GetOrAdd(key, new TaskCompletionSource<DiscoveryMessage>());
             return completionSource;
         }
 
-        private TaskCompletionSource<DiscoveryMessage> RemoveCompletionSource(string senderAddressHash, int messageType)
+        private TaskCompletionSource<DiscoveryMessage> RemoveCompletionSource(Keccak senderAddressHash, int messageType)
         {
             var key = new MessageTypeKey(senderAddressHash, messageType);
             return _waitingEvents.TryRemove(key, out var completionSource) ? completionSource : null;
@@ -232,12 +241,12 @@ namespace Nethermind.Network.Discovery
 
         private void CleanUpLifecycleManagers()
         {
-            if (_nodeLifecycleManagers.Count <= _configurationProvider.MaxNodeLifecycleManagersCount)
+            if (_nodeLifecycleManagers.Count <= _discoveryConfig.MaxNodeLifecycleManagersCount)
             {
                 return;
             }
 
-            int cleanupCount = _configurationProvider.NodeLifecycleManagersCleaupCount;
+            int cleanupCount = _discoveryConfig.NodeLifecycleManagersCleanupCount;
             var activeExcluded = _nodeLifecycleManagers.Where(x => x.Value.State == NodeLifecycleState.ActiveExcluded).Take(cleanupCount).ToArray();
             if (activeExcluded.Length == cleanupCount)
             {
@@ -252,7 +261,7 @@ namespace Nethermind.Network.Discovery
             if(_logger.IsTrace) _logger.Trace($"Removed: {removeCount} unreachable node lifecycle managers");
         }
 
-        private int RemoveManagers(KeyValuePair<string, INodeLifecycleManager>[] items, int count)
+        private int RemoveManagers(KeyValuePair<Keccak, INodeLifecycleManager>[] items, int count)
         {
             var removeCount = 0;
             for (var i = 0; i < count; i++)
@@ -260,7 +269,7 @@ namespace Nethermind.Network.Discovery
                 var item = items[i];
                 if (_nodeLifecycleManagers.TryRemove(item.Key, out _))
                 {
-                    _discoveryStorage.RemoveNodes(new[] { new NetworkNode(item.Value.ManagedNode.Id.PublicKey, item.Value.ManagedNode.Host, item.Value.ManagedNode.Port, item.Value.ManagedNode.Description, item.Value.NodeStats.NewPersistedNodeReputation),  });
+                    _discoveryStorage.RemoveNodes(new[] { new NetworkNode(item.Value.ManagedNode.Id, item.Value.ManagedNode.Host, item.Value.ManagedNode.Port, item.Value.NodeStats.NewPersistedNodeReputation),  });
                     removeCount++;
                 }
             }
@@ -270,10 +279,10 @@ namespace Nethermind.Network.Discovery
 
         private struct MessageTypeKey : IEquatable<MessageTypeKey>
         {
-            public string SenderAddressHash { get; }
+            public Keccak SenderAddressHash { get; }
             public int MessageType { get; }
 
-            public MessageTypeKey(string senderAddressHash, int messageType)
+            public MessageTypeKey(Keccak senderAddressHash, int messageType)
             {
                 SenderAddressHash = senderAddressHash;
                 MessageType = messageType;
@@ -281,13 +290,13 @@ namespace Nethermind.Network.Discovery
             
             public bool Equals(MessageTypeKey other)
             {
-                return string.Equals(SenderAddressHash, other.SenderAddressHash) && MessageType == other.MessageType;
+                return SenderAddressHash.Equals(other.SenderAddressHash) && MessageType == other.MessageType;
             }
 
             public override bool Equals(object obj)
             {
                 if (ReferenceEquals(null, obj)) return false;
-                return obj is MessageTypeKey && Equals((MessageTypeKey)obj);
+                return obj is MessageTypeKey key && Equals(key);
             }
 
             [SuppressMessage("ReSharper", "NonReadonlyMemberInGetHashCode")]

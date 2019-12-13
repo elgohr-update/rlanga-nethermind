@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Threading.Tasks;
-using Nethermind.JsonRpc.DataModel;
+using Nethermind.Core;
+using Nethermind.Core.Json;
+using Nethermind.Evm.Tracing;
 
 namespace Nethermind.EvmPlayground
 {
@@ -23,10 +25,10 @@ namespace Nethermind.EvmPlayground
         private readonly IJsonRpcClient _jsonRpcClient;
         private readonly ILogger _logger;
 
-        private IJsonSerializer _serializer = new JsonSerializer();
+        private IJsonSerializer _serializer = new EthereumJsonSerializer();
 
         public Client()
-            : this(new Uri("http://127.0.0.1:8345"))
+            : this(new Uri("http://127.0.0.1:8545"))
         {
         }
 
@@ -61,6 +63,11 @@ namespace Nethermind.EvmPlayground
         {
             Transaction transaction = new Transaction(sender, data);
             string responseJson = await _jsonRpcClient.Post("eth_sendTransaction", transaction);
+            if (responseJson.StartsWith("Error:"))
+            {
+                return responseJson;
+            }
+            
             JsonRpcResponse response = _serializer.Deserialize<JsonRpcResponse>(responseJson);
             return response.Result;
         }
@@ -68,7 +75,7 @@ namespace Nethermind.EvmPlayground
         public async Task<string> GetTrace(string txHash)
         {
             string responseJson = await _jsonRpcClient.Post("debug_traceTransaction", txHash);
-            JsonRpcResponse<TransactionTrace> response = _serializer.Deserialize<JsonRpcResponse<TransactionTrace>>(responseJson);
+            JsonRpcResponse<GethLikeTxTrace> response = _serializer.Deserialize<JsonRpcResponse<GethLikeTxTrace>>(responseJson);
             return _serializer.Serialize(response.Result, true);
         }
 
@@ -76,8 +83,6 @@ namespace Nethermind.EvmPlayground
         {
             string responseJson = await _jsonRpcClient.Post("eth_getTransactionReceipt", txHash);
             return responseJson;
-//            JsonRpcResponse<TransactionReceipt> response = _serializer.Deserialize<JsonRpcResponse<TransactionReceipt>>(responseJson);
-//            return _serializer.Serialize(response.Result, true);
         }
     }
 }

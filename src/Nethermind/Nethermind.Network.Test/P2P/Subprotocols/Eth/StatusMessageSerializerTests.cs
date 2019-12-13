@@ -50,7 +50,22 @@ namespace Nethermind.Network.Test.P2P.Subprotocols.Eth
             Assert.AreEqual(statusMessage.ChainId, deserialized.ChainId, $"{nameof(deserialized.ChainId)}");
             Assert.AreEqual(statusMessage.ProtocolVersion, deserialized.ProtocolVersion, $"{nameof(deserialized.ProtocolVersion)}");
         }
-
+        
+        [Test]
+        public void Hobbit()
+        {
+            StatusMessage message = new StatusMessage();            
+            message.ProtocolVersion = 63;
+            message.BestHash = Keccak.Compute("1");
+            message.GenesisHash = Keccak.Compute("0");
+            message.TotalDifficulty = 131200;
+            message.ChainId = 1;
+            
+            StatusMessageSerializer serializer = new StatusMessageSerializer();
+            SerializerTester.Test(serializer, message);
+            SerializerTester.TestZero(serializer, message);
+        }
+        
         [Test]
         public void Can_deserialize_example_from_ethereumJ()
         {

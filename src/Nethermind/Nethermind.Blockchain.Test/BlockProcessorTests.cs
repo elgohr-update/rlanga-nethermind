@@ -17,12 +17,15 @@
  */
 
 using Nethermind.Blockchain.Receipts;
+using Nethermind.Blockchain.Rewards;
+using Nethermind.Blockchain.TxPools;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
 using Nethermind.Evm;
+using Nethermind.Evm.Tracing;
+using Nethermind.Logging;
 using Nethermind.Store;
 using NSubstitute;
 using NUnit.Framework;
@@ -37,24 +40,26 @@ namespace Nethermind.Blockchain.Test
         {
             ISnapshotableDb stateDb = new StateDb();
             ISnapshotableDb codeDb = new StateDb();
-            IStateProvider stateProvider = new StateProvider(new StateTree(stateDb, Keccak.EmptyTreeHash), codeDb, NullLogManager.Instance);
+            IDb traceDb = new MemDb();
+            IStateProvider stateProvider = new StateProvider(stateDb, codeDb, LimboLogs.Instance);
             ITransactionProcessor transactionProcessor = Substitute.For<ITransactionProcessor>();
             BlockProcessor processor = new BlockProcessor(
                 RinkebySpecProvider.Instance,
                 TestBlockValidator.AlwaysValid,
-                new NoBlockRewards(),
+                NoBlockRewards.Instance,
                 transactionProcessor,
                 stateDb,
                 codeDb,
+                traceDb,
                 stateProvider,
-                new StorageProvider(stateDb, stateProvider, NullLogManager.Instance),
-                NullTransactionPool.Instance,
-                NullReceiptStorage.Instance,
-                NullLogManager.Instance);
+                new StorageProvider(stateDb, stateProvider, LimboLogs.Instance),
+                NullTxPool.Instance,
+                NullReceiptStorage.Instance, 
+                LimboLogs.Instance);
 
-            BlockHeader header = Build.A.BlockHeader.WithAuthor(TestObject.AddressD).TestObject;
+            BlockHeader header = Build.A.BlockHeader.WithAuthor(TestItem.AddressD).TestObject;
             Block block = Build.A.Block.WithHeader(header).TestObject;
-            Block[] processedBlocks = processor.Process(Keccak.EmptyTreeHash, new [] {block}, ProcessingOptions.None, NullTraceListener.Instance);
+            Block[] processedBlocks = processor.Process(Keccak.EmptyTreeHash, new [] {block}, ProcessingOptions.None, NullBlockTracer.Instance);
             Assert.AreEqual(1, processedBlocks.Length, "length");
             Assert.AreEqual(block.Author, processedBlocks[0].Author, "author");
         }

@@ -17,14 +17,18 @@
  */
 
 using System;
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
+using Nethermind.Logging;
 
 [assembly: InternalsVisibleTo("Nethermind.Mining.Test")]
 
@@ -39,29 +43,29 @@ namespace Nethermind.Mining
             _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
         }
 
-        private readonly LruCache<uint, IEthashDataSet> _cacheCache = new LruCache<uint, IEthashDataSet>(2);
+        private readonly LruCache<uint, Task<IEthashDataSet>> _cacheCache = new LruCache<uint, Task<IEthashDataSet>>(10);
 
         public const int WordBytes = 4; // bytes in word
-        public static uint DatasetBytesInit = (uint)BigInteger.Pow(2, 30); // bytes in dataset at genesis
-        public static uint DatasetBytesGrowth = (uint)BigInteger.Pow(2, 23); // dataset growth per epoch
-        public static uint CacheBytesInit = (uint)BigInteger.Pow(2, 24); // bytes in cache at genesis
-        public static uint CacheBytesGrowth = (uint)BigInteger.Pow(2, 17); // cache growth per epoch
+        public static uint DataSetBytesInit = (uint) BigInteger.Pow(2, 30); // bytes in dataset at genesis
+        public static uint DataSetBytesGrowth = (uint) BigInteger.Pow(2, 23); // dataset growth per epoch
+        public static uint CacheBytesInit = (uint) BigInteger.Pow(2, 24); // bytes in cache at genesis
+        public static uint CacheBytesGrowth = (uint) BigInteger.Pow(2, 17); // cache growth per epoch
         public const int CacheMultiplier = 1024; // Size of the DAG relative to the cache
         public const ulong EpochLength = 30000; // blocks per epoch
         public const uint MixBytes = 128; // width of mix
         public const int HashBytes = 64; // hash length in bytes
-        public const uint DatasetParents = 256; // blockNumber of parents of each dataset element
+        public const uint DataSetParents = 256; // blockNumber of parents of each dataset element
         public const int CacheRounds = 3; // blockNumber of rounds in cache production
         public const int Accesses = 64; // blockNumber of accesses in hashimoto loop
 
         public static uint GetEpoch(BigInteger blockNumber)
         {
-            return (uint)(blockNumber / EpochLength);
+            return (uint) (blockNumber / EpochLength);
         }
 
         public static ulong GetDataSize(uint epoch)
         {
-            ulong size = DatasetBytesInit + DatasetBytesGrowth * (ulong)epoch;
+            ulong size = DataSetBytesInit + DataSetBytesGrowth * (ulong) epoch;
             size -= MixBytes;
             while (!IsPrime(size / MixBytes))
             {
@@ -151,10 +155,10 @@ namespace Nethermind.Mining
             ulong nonce = startNonce ?? GetRandomNonce();
             BigInteger target = BigInteger.Divide(_2To256, header.Difficulty);
             Keccak headerHashed = GetTruncatedHash(header);
-            
+
             // parallel for (just with ulong...) - adjust based on the available mining threads, low priority
             byte[] mixHash;
-            while(true)
+            while (true)
             {
                 byte[] result;
                 (mixHash, result) = Hashimoto(fullSize, GetOrAddCache(epoch), headerHashed, null, nonce);
@@ -162,11 +166,11 @@ namespace Nethermind.Mining
                 {
                     break;
                 }
-                
+
                 unchecked
                 {
                     nonce += 1;
-                }  
+                }
             }
 
             return (new Keccak(mixHash), nonce);
@@ -189,7 +193,7 @@ namespace Nethermind.Mining
 
         internal static uint GetUInt(byte[] bytes, uint offset)
         {
-            return BitConverter.ToUInt32(BitConverter.IsLittleEndian ? bytes : Bytes.Reverse(bytes), (int)offset * 4);
+            return BitConverter.ToUInt32(BitConverter.IsLittleEndian ? bytes : Bytes.Reverse(bytes), (int) offset * 4);
         }
 
         public bool Validate(BlockHeader header)
@@ -204,41 +208,51 @@ namespace Nethermind.Mining
             return IsLessThanTarget(result, threshold);
         }
 
-        public void PrecomputeCache(uint epoch)
-        {
-            GetOrAddCache(epoch);
-        }
-        
         private readonly Stopwatch _cacheStopwatch = new Stopwatch();
-        
-        // TODO: in a separate thread
+
         private IEthashDataSet GetOrAddCache(uint epoch)
         {
-            IEthashDataSet dataSet = _cacheCache.Get(epoch);
-            if (dataSet == null)
+            lock (_cacheCache)
+            {
+                for (uint i = Math.Max(epoch, 2) - 2; i < epoch + 3; i++)
+                {
+                    if (_cacheCache.Get(i) == null)
+                    {
+                        _cacheCache.Set(i, BuildCache(i));
+                    }
+                }
+
+                return _cacheCache.Get(epoch).Result;
+            }
+        }
+
+        private Task<IEthashDataSet> BuildCache(uint epoch)
+        {
+            return Task.Run(() =>
             {
                 uint cacheSize = GetCacheSize(epoch);
                 Keccak seed = GetSeedHash(epoch);
-                if(_logger.IsDebug) _logger.Debug($"Building cache for epoch {epoch}");
+                if (_logger.IsInfo) _logger.Info($"Building ethash cache for epoch {epoch}");
                 _cacheStopwatch.Restart();
-                dataSet = new EthashCache(cacheSize, seed.Bytes);
+                IEthashDataSet dataSet = new EthashCache(cacheSize, seed.Bytes);
                 _cacheStopwatch.Stop();
-                if(_logger.IsDebug) _logger.Debug($"Cache for epoch {epoch} built in {_cacheStopwatch.ElapsedMilliseconds}ms");
-                _cacheCache.Set(epoch, dataSet);
-            }
-           
-            return dataSet;
+                if (_logger.IsInfo) _logger.Info($"Cache for epoch {epoch} with size {cacheSize} nd seed {seed.Bytes.ToHexString()} built in {_cacheStopwatch.ElapsedMilliseconds}ms");
+                return dataSet;
+            });
         }
+
+        private static HeaderDecoder _headerDecoder = new HeaderDecoder();
 
         private static Keccak GetTruncatedHash(BlockHeader header)
         {
-            Keccak headerHashed = Keccak.Compute(Rlp.Encode(header, RlpBehaviors.ExcludeBlockMixHashAndNonce)); // sic! Keccak here not Keccak512
+            Rlp encoded = _headerDecoder.Encode(header, RlpBehaviors.ForSealing);
+            Keccak headerHashed = Keccak.Compute(encoded); // sic! Keccak here not Keccak512
             return headerHashed;
         }
 
         public (byte[], byte[]) Hashimoto(ulong fullSize, IEthashDataSet dataSet, Keccak headerHash, Keccak expectedMixHash, ulong nonce)
         {
-            uint hashesInFull = (uint)(fullSize / HashBytes); // TODO: at current rate would cover around 200 years... but will the block rate change? what with private chains with shorter block times?
+            uint hashesInFull = (uint) (fullSize / HashBytes); // TODO: at current rate would cover around 200 years... but will the block rate change? what with private chains with shorter block times?
             const uint wordsInMix = MixBytes / WordBytes;
             const uint hashesInMix = MixBytes / HashBytes;
             byte[] headerAndNonceHashed = Keccak512.Compute(Bytes.Concat(headerHash.Bytes, nonce.ToByteArray(Bytes.Endianness.Little))).Bytes; // this tests fine
@@ -249,24 +263,24 @@ namespace Nethermind.Mining
                 Buffer.BlockCopy(headerAndNonceHashed, 0, mixInts, i * headerAndNonceHashed.Length, headerAndNonceHashed.Length);
             }
 
-            uint firstOfheaderAndNonce = GetUInt(headerAndNonceHashed, 0);
+            uint firstOfHeaderAndNonce = GetUInt(headerAndNonceHashed, 0);
             for (uint i = 0; i < Accesses; i++)
             {
-                uint p = Fnv(i ^ firstOfheaderAndNonce, mixInts[i % wordsInMix]) % (hashesInFull / hashesInMix) * hashesInMix; // since we take 'hashesInMix' consecutive blocks we want only starting indices of such blocks
+                uint p = Fnv(i ^ firstOfHeaderAndNonce, mixInts[i % wordsInMix]) % (hashesInFull / hashesInMix) * hashesInMix; // since we take 'hashesInMix' consecutive blocks we want only starting indices of such blocks
                 uint[] newData = new uint[wordsInMix];
                 for (uint j = 0; j < hashesInMix; j++)
                 {
                     uint[] item = dataSet.CalcDataSetItem(p + j);
-                    Buffer.BlockCopy(item, 0, newData, (int)(j * item.Length * 4), item.Length * 4);
+                    Buffer.BlockCopy(item, 0, newData, (int) (j * item.Length * 4), item.Length * 4);
                 }
 
                 Fnv(mixInts, newData);
             }
-            
+
             uint[] cmixInts = new uint[MixBytes / WordBytes / 4];
             for (uint i = 0; i < mixInts.Length; i += 4)
             {
-                cmixInts[i / 4] = Fnv(Fnv(Fnv(mixInts[i], mixInts[i+1]), mixInts[i + 2]), mixInts[i + 3]);
+                cmixInts[i / 4] = Fnv(Fnv(Fnv(mixInts[i], mixInts[i + 1]), mixInts[i + 2]), mixInts[i + 3]);
             }
 
             byte[] cmix = new byte[MixBytes / WordBytes];

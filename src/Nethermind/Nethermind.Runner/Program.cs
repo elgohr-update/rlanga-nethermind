@@ -17,7 +17,7 @@
  */
 
 using System;
-using Nethermind.Core.Logging;
+using Nethermind.Logging;
 
 namespace Nethermind.Runner
 {
@@ -52,8 +52,8 @@ namespace Nethermind.Runner
                 logger.Error(FailureString, e);
             }
 
-            Console.WriteLine("Press any key to exit.");
-            Console.ReadKey();
+            Console.WriteLine("Press RETURN to exit.");
+            Console.ReadLine();
         }
     }
 }

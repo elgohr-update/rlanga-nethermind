@@ -17,8 +17,7 @@
  */
 
 using System.Collections.Generic;
-using Nethermind.Core.Model;
-using Nethermind.Stats;
+using Nethermind.Core.Crypto;
 using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.P2P
@@ -29,7 +28,7 @@ namespace Nethermind.Network.P2P
         public string ClientId { get; set; }
         public List<Capability> Capabilities { get; set; }
         public int ListenPort { get; set; }
-        public NodeId NodeId { get; set; }
+        public PublicKey NodeId { get; set; }
         public override string Protocol => "p2p";
         public override int PacketType => P2PMessageCode.Hello;
     }

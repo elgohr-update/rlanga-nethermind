@@ -16,27 +16,32 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Generic;
 using System.Numerics;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
+using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Store
 {
     public class StorageTree : PatriciaTree
     {
-        private static readonly BigInteger CacheSize = 1024;
+        private static readonly UInt256 CacheSize = 1024;
 
         private static readonly int CacheSizeInt = (int)CacheSize;
 
-        private static readonly Dictionary<BigInteger, byte[]> Cache = new Dictionary<BigInteger, byte[]>(CacheSizeInt);
+        private static readonly Dictionary<UInt256, byte[]> Cache = new Dictionary<UInt256, byte[]>(CacheSizeInt);
 
         static StorageTree()
         {
             for (int i = 0; i < CacheSizeInt; i++)
             {
-                Cache[i] = Keccak.Compute(new BigInteger(i).ToBigEndianByteArray(32)).Bytes;
+                UInt256 index = (UInt256)i;
+                Span<byte> span = stackalloc byte[32];
+                index.ToBigEndian(span);
+                Cache[index] = Keccak.Compute(span).Bytes;
             }
         }
 
@@ -47,31 +52,33 @@ namespace Nethermind.Store
         public StorageTree(IDb db, Keccak rootHash) : base(db, rootHash, false)
         {
         }
-
-        private byte[] GetKey(BigInteger index)
+        
+        private Span<byte> GetKey(UInt256 index)
         {
             if (index < CacheSize)
             {
                 return Cache[index];
             }
 
-            return Keccak.Compute(index.ToBigEndianByteArray(32)).Bytes;
+            Span<byte> span = stackalloc byte[32];
+            index.ToBigEndian(span);
+            return ValueKeccak.Compute(span).BytesAsSpan.ToArray();
         }
-
-        public byte[] Get(BigInteger index)
+        
+        public byte[] Get(UInt256 index)
         {
-            byte[] key = GetKey(index);
+            Span<byte> key = GetKey(index);
             byte[] value = Get(key);
             if (value == null)
             {
                 return new byte[] {0};
             }
 
-            Rlp.DecoderContext rlp = value.AsRlpContext();
+            Rlp.ValueDecoderContext rlp = value.AsRlpValueContext();
             return rlp.DecodeByteArray();
         }
 
-        public void Set(BigInteger index, byte[] value)
+        public void Set(UInt256 index, byte[] value)
         {
             if (value.IsZero())
             {

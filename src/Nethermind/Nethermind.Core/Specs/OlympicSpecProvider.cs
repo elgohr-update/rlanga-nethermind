@@ -16,23 +16,21 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Core.Specs.Forks;
 
 namespace Nethermind.Core.Specs
 {
     public class OlympicSpecProvider : ISpecProvider
     {
-        public IReleaseSpec CurrentSpec => Olympic.Instance;
-
         public IReleaseSpec GenesisSpec => Olympic.Instance;
 
-        public IReleaseSpec GetSpec(UInt256 blockNumber)
+        public IReleaseSpec GetSpec(long blockNumber)
         {            
             return Olympic.Instance;
         }
         
-        public UInt256? DaoBlockNumber { get; } = null;
-        
+        public long? DaoBlockNumber { get; } = null;
+
         public int ChainId => 3;
 
         private OlympicSpecProvider()

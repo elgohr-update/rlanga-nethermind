@@ -22,31 +22,57 @@ namespace Nethermind.Runner.Config
 {
     public interface IInitConfig : IConfig
     {
-        bool JsonRpcEnabled { get; set; }
+        [ConfigItem(Description = "If 'true' then it enables the wallet / key store in the application.", DefaultValue = "false")]
+        bool EnableUnsecuredDevWallet { get; set; }
+        
+        [ConfigItem(Description = "If 'true' then any accounts created will be only valid during the session and deleted when application closes.", DefaultValue = "false")]
+        bool KeepDevWalletInMemory{ get; set; }
+
+        [ConfigItem(Description = "Defines whether the WebSockets service is enabled on node startup at the 'HttpPort'", DefaultValue = "false")]
+        bool WebSocketsEnabled { get; set; }
+        
+        [ConfigItem(Description = "If 'false' then the node does not try to find nodes beyond the bootnodes configured.", DefaultValue = "true")]
         bool DiscoveryEnabled { get; set; }
+        
+        [ConfigItem(Description = "If 'false' then the node does not download/process new blocks..", DefaultValue = "true")]
         bool SynchronizationEnabled { get; set; }
-        bool NetworkEnabled { get; set; }
+        
+        [ConfigItem(Description = "If 'false' then the node does not download/process new blocks..", DefaultValue = "true")]
         bool ProcessingEnabled { get; set; }
+        
+        [ConfigItem(Description = "If 'false' then the node does not connect to newly discovered peers..", DefaultValue = "true")]
         bool PeerManagerEnabled { get; set; }
-        bool RunAsReceiptsFiller { get; set; }
+        
+        [ConfigItem(Description = "If 'true' then the node will try to seal/mine new blocks", DefaultValue = "false")]
         bool IsMining { get; set; }
-        string HttpHost { get; set; }
-        int HttpPort { get; set; }
-        int DiscoveryPort { get; set; }
-        int P2PPort { get; set; }
+
+        [ConfigItem(Description = "Path to the chain definition file (Parity chainspec or Geth genesis file).", DefaultValue = "null")]
         string ChainSpecPath { get; set; }
+        
+        [ConfigItem(Description = "Format of the chain definition file - genesis (Geth style - not tested recently / may fail) or chainspec (Parity style).", DefaultValue = "\"chainspec\"")]
+        string ChainSpecFormat { get; set; }
+        
+        [ConfigItem(Description = "Base directoy path for all the nethermind databases.", DefaultValue = "\"db\"")]
         string BaseDbPath { get; set; }
-        string TestNodeKey { get; set; }
+        
+        [ConfigItem(Description = "Hash of the genesis block - if the default null value is left then the genesis block validity will not be checked which is useful for ad hoc test/private networks.", DefaultValue = "null")]
         string GenesisHash { get; set; }
-        string[] JsonRpcEnabledModules { get; set; }
-        bool RemovingLogFilesEnabled { get; set; }
+        
+        [ConfigItem(Description = "Path to the file with a list of static nodes.", DefaultValue = "\"Data/static-nodes.json\"")]
+        string StaticNodesPath { get; set; }
+  
+        [ConfigItem(Description = "Name of the log file generated (useful when launching multiple networks with the same log folder).", DefaultValue = "\"log.txt\"")]
         string LogFileName { get; set; }
+        
+        [ConfigItem(Description = "In case of null, the path is set to [applicationDirectiory]\\logs", DefaultValue = "null")]
         string LogDirectory { get; set; }
-        bool LogPerfStatsOnDebug { get; set; }
-        int ReceiptsFillerStart { get; set; }
-        int ReceiptsFillerEnd { get; set; }
-        int ObsoletePendingTransactionInterval { get; set; }
-        int RemovePendingTransactionInterval { get; set; }
-        int PeerNotificationThreshold { get; set; }
+        
+        [ConfigItem(Description = "If set to 'true' then the detailed VM trace data will be stored in teh DB (huge data sets).", DefaultValue = "false")]
+        bool StoreTraces { get; set; }
+        
+        [ConfigItem(Description = "If set to 'false' then transaction receipts will not be stored in the database.", DefaultValue = "true")]
+        bool StoreReceipts { get; set; }
+        
+        bool EnableRc7Fix { get; set; }
     }
 }

@@ -17,18 +17,24 @@
  */
 
 using System;
+using Nethermind.Blockchain.TxPools;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
+using Nethermind.Logging;
 
 namespace Nethermind.Blockchain
 {
     public class TxSignaturesRecoveryStep : IBlockDataRecoveryStep
     {
-        private readonly IEthereumSigner _signer;
+        private readonly IEthereumEcdsa _ecdsa;
+        private readonly ITxPool _txPool;
+        private readonly ILogger _logger;
 
-        public TxSignaturesRecoveryStep(IEthereumSigner signer)
+        public TxSignaturesRecoveryStep(IEthereumEcdsa ecdsa, ITxPool txPool, ILogManager logManager)
         {
-            _signer = signer ?? throw new ArgumentNullException(nameof(signer));
+            _ecdsa = ecdsa ?? throw new ArgumentNullException(nameof(ecdsa));
+            _txPool = txPool ?? throw new ArgumentNullException(nameof(ecdsa));
+            _logger = logManager?.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
         }
         
         public void RecoverData(Block block)
@@ -40,7 +46,9 @@ namespace Nethermind.Blockchain
             
             for (int i = 0; i < block.Transactions.Length; i++)
             {
-                block.Transactions[i].SenderAddress = _signer.RecoverAddress(block.Transactions[i], block.Number);
+                _txPool.TryGetSender(block.Transactions[i].Hash, out Address sender);
+                block.Transactions[i].SenderAddress = sender ?? _ecdsa.RecoverAddress(block.Transactions[i], block.Number);
+                if(_logger.IsTrace) _logger.Trace($"Recovered {block.Transactions[i].SenderAddress} sender for {block.Transactions[i].Hash} (tx pool cached value: {sender})");
             }
         }
     }

@@ -20,8 +20,8 @@ using System;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
-using Nethermind.Core.Specs;
+using Nethermind.Core.Specs.Forks;
+using Nethermind.Logging;
 using NSubstitute;
 using NUnit.Framework;
 
@@ -30,7 +30,7 @@ namespace Nethermind.Store.Test
     [TestFixture]
     public class StorageProviderTests
     {
-        private static readonly ILogManager LogManager = NullLogManager.Instance;
+        private static readonly ILogManager LogManager = LimboLogs.Instance;
         private readonly Address _address1 = new Address(Keccak.Compute("1"));
         private readonly Address _address2 = new Address(Keccak.Compute("2"));
         private IStateProvider _stateProvider;
@@ -38,7 +38,7 @@ namespace Nethermind.Store.Test
         [SetUp]
         public void Setup()
         {
-            _stateProvider = new StateProvider(new StateTree(new MemDb()), Substitute.For<IDb>(), LogManager);
+            _stateProvider = new StateProvider(new StateDb(new MemDb()), Substitute.For<IDb>(), LogManager);
             _stateProvider.CreateAccount(_address1, 0);
             _stateProvider.CreateAccount(_address2, 0);
             _stateProvider.Commit(Frontier.Instance);
@@ -65,7 +65,7 @@ namespace Nethermind.Store.Test
         public void Empty_commit_restore()
         {
             StorageProvider provider = BuildStorageProvider();
-            provider.Commit(Frontier.Instance);
+            provider.Commit();
             provider.Restore(-1);
         }
 
@@ -95,7 +95,7 @@ namespace Nethermind.Store.Test
         {
             StorageProvider provider = BuildStorageProvider();
             provider.Set(new StorageAddress(_address1, 1), _values[1]);
-            provider.Commit(Frontier.Instance);
+            provider.Commit();
             provider.Get(new StorageAddress(_address1, 1));
             provider.Set(new StorageAddress(_address1, 1), _values[2]);
             provider.Restore(-1);
@@ -128,19 +128,19 @@ namespace Nethermind.Store.Test
             provider.Set(new StorageAddress(_address1, 1), _values[1]);
             provider.Set(new StorageAddress(_address1, 2), _values[2]);
             provider.Set(new StorageAddress(_address1, 3), _values[3]);
-            provider.Commit(Frontier.Instance);
+            provider.Commit();
             provider.Set(new StorageAddress(_address2, 1), _values[4]);
             provider.Set(new StorageAddress(_address2, 2), _values[5]);
             provider.Set(new StorageAddress(_address2, 3), _values[6]);
-            provider.Commit(Frontier.Instance);
+            provider.Commit();
             provider.Set(new StorageAddress(_address1, 1), _values[7]);
             provider.Set(new StorageAddress(_address1, 2), _values[8]);
             provider.Set(new StorageAddress(_address1, 3), _values[9]);
-            provider.Commit(Frontier.Instance);
+            provider.Commit();
             provider.Set(new StorageAddress(_address2, 1), _values[10]);
             provider.Set(new StorageAddress(_address2, 2), _values[11]);
             provider.Set(new StorageAddress(_address2, 3), _values[12]);
-            provider.Commit(Frontier.Instance);
+            provider.Commit();
             provider.Restore(-1);
 
             Assert.AreEqual(_values[7], provider.Get(new StorageAddress(_address1, 1)));
@@ -159,7 +159,7 @@ namespace Nethermind.Store.Test
             provider.Set(new StorageAddress(_address1, 2), _values[2]);
             provider.Set(new StorageAddress(_address1, 3), _values[3]);
             provider.Restore(-1);
-            provider.Commit(Frontier.Instance);
+            provider.Commit();
 
             Assert.IsTrue(provider.Get(new StorageAddress(_address1, 1)).IsZero());
         }
@@ -187,7 +187,7 @@ namespace Nethermind.Store.Test
             provider.Get(new StorageAddress(_address1, 1));
             provider.Get(new StorageAddress(_address1, 1));
             provider.Get(new StorageAddress(_address1, 1));
-            provider.Commit(Frontier.Instance);
+            provider.Commit();
 
             Assert.True(provider.Get(new StorageAddress(_address1, 1)).IsZero());
         }
@@ -198,7 +198,7 @@ namespace Nethermind.Store.Test
             // block 1
             StorageProvider storageProvider = BuildStorageProvider();
             storageProvider.Set(new StorageAddress(_address1, 1), _values[1]);
-            storageProvider.Commit(Frontier.Instance);
+            storageProvider.Commit();
             _stateProvider.Commit(Frontier.Instance);
             storageProvider.CommitTrees();
             _stateProvider.CommitTree();
@@ -206,7 +206,7 @@ namespace Nethermind.Store.Test
             // block 2
             Keccak stateRoot = _stateProvider.StateRoot;
             storageProvider.Set(new StorageAddress(_address1, 1), _values[2]);
-            storageProvider.Commit(Frontier.Instance);
+            storageProvider.Commit();
             _stateProvider.Commit(Frontier.Instance);
             
             // revert
@@ -224,16 +224,16 @@ namespace Nethermind.Store.Test
         {
             // block 1
             StorageProvider storageProvider = BuildStorageProvider();
-            for (int i = 0; i < StorageProvider.StartCapacity; i++)
+            for (int i = 0; i < Resettable.StartCapacity; i++)
             {
                 storageProvider.Set(new StorageAddress(_address1, 1), _values[i % 2]);
             }
             
-            storageProvider.Commit(Frontier.Instance);
+            storageProvider.Commit();
             _stateProvider.Commit(Frontier.Instance);
             
             byte[] valueAfter = storageProvider.Get(new StorageAddress(_address1, 1));
-            Assert.AreEqual(_values[(StorageProvider.StartCapacity + 1) % 2], valueAfter);
+            Assert.AreEqual(_values[(Resettable.StartCapacity + 1) % 2], valueAfter);
         }
     }
 }

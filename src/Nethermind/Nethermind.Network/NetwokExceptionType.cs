@@ -19,11 +19,12 @@
 
 namespace Nethermind.Network
 {
-    public enum NetwokExceptionType
+    public enum NetworkExceptionType
     {
         TargetUnreachable,
         Timeout,
         Validation,
+        Discovery,
         Other
     }
 }

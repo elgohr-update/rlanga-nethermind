@@ -18,14 +18,18 @@
 
 namespace Nethermind.Store
 {
-    public class MemDbProvider: IDbProvider
+    public class MemDbProvider : IDbProvider
     {
         public ISnapshotableDb StateDb { get; } = new StateDb();
         public ISnapshotableDb CodeDb { get; } = new StateDb();
         public IDb ReceiptsDb { get; } = new MemDb();
         public IDb BlocksDb { get; } = new MemDb();
+        public IDb HeadersDb { get; } = new MemDb();
         public IDb BlockInfosDb { get; } = new MemDb();
         public IDb PendingTxsDb { get; } = new MemDb();
+        public IDb TraceDb { get; } = new MemDb();
+        public IDb ConfigsDb { get; } = new MemDb();
+        public IDb EthRequestsDb { get; } = new MemDb();
 
         public void Dispose()
         {
@@ -35,6 +39,8 @@ namespace Nethermind.Store
             BlocksDb?.Dispose();
             BlockInfosDb?.Dispose();
             PendingTxsDb?.Dispose();
+            ConfigsDb?.Dispose();
+            EthRequestsDb?.Dispose();
         }
     }
 }

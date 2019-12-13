@@ -29,7 +29,7 @@ namespace Ethereum.VM.Test
     {
         private static readonly Dictionary<string, AbiType> TypesByName = new Dictionary<string, AbiType>
         {
-            {"uint256", AbiType.UInt},
+            {"uint256", AbiType.UInt256},
             {"uint32[]", new AbiArray(new AbiUInt(32))},
             {"bytes10", new AbiBytes(10)},
             {"bytes", AbiType.DynamicBytes},
@@ -64,7 +64,7 @@ namespace Ethereum.VM.Test
         {
             AbiEncoder encoder = new AbiEncoder();
             AbiSignature signature = new AbiSignature(abiTest.Name, abiTest.Types);
-            byte[] encoded = encoder.Encode(signature, abiTest.Args).Slice(4);
+            byte[] encoded = encoder.Encode(AbiEncodingStyle.IncludeSignature, signature, abiTest.Args).Slice(4);
             Assert.True(Bytes.AreEqual(abiTest.Result, encoded));
         }
 

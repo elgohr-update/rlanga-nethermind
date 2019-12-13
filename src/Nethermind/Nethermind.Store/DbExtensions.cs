@@ -16,6 +16,7 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Numerics;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
@@ -31,17 +32,58 @@ namespace Nethermind.Store
         
         public static byte[] Get(this IDb db, Keccak key)
         {
+            #if DEBUG
+            if (key == Keccak.OfAnEmptyString)
+            {
+                throw new InvalidOperationException();
+            }
+            #endif
+            
             return db[key.Bytes];
         }
         
-        public static void Set(this IDb db, BigInteger key, byte[] value)
+        public static Span<byte> GetSpan(this IDbWithSpan db, Keccak key)
         {
-            db[key.ToBigEndianByteArray()] = value;
+#if DEBUG
+            if (key == Keccak.OfAnEmptyString)
+            {
+                throw new InvalidOperationException();
+            }
+#endif
+            
+            return db.GetSpan(key.Bytes);
         }
         
-        public static byte[] Get(this IDb db, BigInteger key)
+        public static bool KeyExists(this IDb db, Keccak key)
         {
-            return db[key.ToBigEndianByteArray()];
+#if DEBUG
+            if (key == Keccak.OfAnEmptyString)
+            {
+                throw new InvalidOperationException();
+            }
+#endif
+            
+            return db.KeyExists(key.Bytes);
+        }
+        
+        public static void Delete(this IDb db, Keccak key)
+        {
+            db.Remove(key.Bytes);
+        }
+        
+        public static void Set(this IDb db, long key, byte[] value)
+        {
+            db[key.ToBigEndianByteArrayWithoutLeadingZeros()] = value;
+        }
+        
+        public static byte[] Get(this IDb db, long key)
+        {
+            return db[key.ToBigEndianByteArrayWithoutLeadingZeros()];
+        }
+        
+        public static void Delete(this IDb db, long key)
+        {
+            db.Remove(key.ToBigEndianByteArrayWithoutLeadingZeros());
         }
     }
 }

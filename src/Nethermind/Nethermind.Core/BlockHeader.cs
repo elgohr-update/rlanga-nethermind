@@ -16,8 +16,11 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Diagnostics;
+using System.IO;
 using System.Text;
+using System.Threading;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
@@ -32,7 +35,7 @@ namespace Nethermind.Core
         {
         }
 
-        public BlockHeader(Keccak parentHash, Keccak ommersHash, Address beneficiary, UInt256 difficulty, UInt256 number, long gasLimit, UInt256 timestamp, byte[] extraData)
+        public BlockHeader(Keccak parentHash, Keccak ommersHash, Address beneficiary, UInt256 difficulty, long number, long gasLimit, UInt256 timestamp, byte[] extraData)
         {
             ParentHash = parentHash;
             OmmersHash = ommersHash;
@@ -44,59 +47,62 @@ namespace Nethermind.Core
             ExtraData = extraData;
         }
 
+        public bool IsGenesis => Number == 0;
         public Keccak ParentHash { get; internal set; }
         public Keccak OmmersHash { get; set; }
         public Address Author { get; set; }
         public Address Beneficiary { get; set; }
         public Address GasBeneficiary => Author ?? Beneficiary;
-
         public Keccak StateRoot { get; set; }
-        public Keccak TransactionsRoot { get; set; }
+        public Keccak TxRoot { get; set; }
         public Keccak ReceiptsRoot { get; set; }
         public Bloom Bloom { get; set; }
         public UInt256 Difficulty { get; set; }
-        public UInt256 Number { get; internal set; }
+        public long Number { get; set; }
         public long GasUsed { get; set; }
-        public long GasLimit { get; internal set; }
+        public long GasLimit { get; set; }
         public UInt256 Timestamp { get; set; }
+        public DateTime TimestampDate => DateTimeOffset.FromUnixTimeSeconds((long) Timestamp).DateTime;
         public byte[] ExtraData { get; set; }
         public Keccak MixHash { get; set; }
         public ulong Nonce { get; set; }
         public Keccak Hash { get; set; }
         public UInt256? TotalDifficulty { get; set; }
-        public UInt256? TotalTransactions { get; set; }
+        public byte[] AuRaSignature { get; set; }
+        public long? AuRaStep { get; set; }
+        
+        public bool HasBody => OmmersHash != Keccak.OfAnEmptySequenceRlp || TxRoot != Keccak.EmptyTreeHash;
         public SealEngineType SealEngineType { get; set; } = SealEngineType.Ethash;
 
-        public static Keccak CalculateHash(Rlp headerRlp)
+        private static HeaderDecoder _headerDecoder = new HeaderDecoder();
+
+        public static Keccak CalculateHash(BlockHeader header, RlpBehaviors behaviors = RlpBehaviors.None)
         {
-            return Keccak.Compute(headerRlp);
+            Rlp buffer = _headerDecoder.Encode(header, behaviors);
+            return Keccak.Compute(buffer.Bytes);
         }
 
-        public static Keccak CalculateHash(BlockHeader header)
-        {
-            return CalculateHash(Rlp.Encode(header));
-        }
-        
-        public static Keccak CalculateHash(Block block)
-        {
-            return CalculateHash(Rlp.Encode(block.Header));
-        }
+        public static Keccak CalculateHash(Block block) => CalculateHash(block.Header);
 
         public string ToString(string indent)
         {
             StringBuilder builder = new StringBuilder();
-            builder.AppendLine($"{indent}Parent: {ParentHash}");
-            builder.AppendLine($"{indent}Ommers Hash: {OmmersHash}");
-            builder.AppendLine($"{indent}Beneficiary: {Beneficiary}");
-            builder.AppendLine($"{indent}Difficulty: {Difficulty}");
+            builder.AppendLine($"{indent}Hash: {Hash}");
             builder.AppendLine($"{indent}Number: {Number}");
+            builder.AppendLine($"{indent}Parent: {ParentHash}");
+            builder.AppendLine($"{indent}Beneficiary: {Beneficiary}");
             builder.AppendLine($"{indent}Gas Limit: {GasLimit}");
             builder.AppendLine($"{indent}Gas Used: {GasUsed}");
             builder.AppendLine($"{indent}Timestamp: {Timestamp}");
             builder.AppendLine($"{indent}Extra Data: {(ExtraData ?? new byte[0]).ToHexString()}");
+            builder.AppendLine($"{indent}Difficulty: {Difficulty}");
             builder.AppendLine($"{indent}Mix Hash: {MixHash}");
             builder.AppendLine($"{indent}Nonce: {Nonce}");
-            builder.AppendLine($"{indent}Hash: {Hash}");
+            builder.AppendLine($"{indent}Ommers Hash: {OmmersHash}");
+            builder.AppendLine($"{indent}Tx Root: {TxRoot}");
+            builder.AppendLine($"{indent}Receipts Root: {ReceiptsRoot}");
+            builder.AppendLine($"{indent}State Root: {StateRoot}");
+
             return builder.ToString();
         }
 
@@ -123,7 +129,8 @@ namespace Nethermind.Core
             }
         }
 
-        public enum Format // TODO: use formatting strings / standard approach?
+        [Todo(Improve.Refactor, "Use IFormattable here")]
+        public enum Format
         {
             Full,
             Short

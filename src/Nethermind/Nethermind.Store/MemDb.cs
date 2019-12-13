@@ -16,8 +16,11 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using Nethermind.Core.Extensions;
 
 namespace Nethermind.Store
@@ -27,8 +30,10 @@ namespace Nethermind.Store
         public long ReadsCount { get; private set; }
         public long WritesCount { get; private set; }
         
-        private readonly Dictionary<byte[], byte[]> _db;
-        
+        internal readonly ConcurrentDictionary<byte[], byte[]> _db;
+
+        public string Name { get; } = "MemDb";
+
         public byte[] this[byte[] key]
         {
             get
@@ -45,7 +50,12 @@ namespace Nethermind.Store
 
         public void Remove(byte[] key)
         {
-            _db.Remove(key);
+            _db.TryRemove(key, out _);
+        }
+
+        public bool KeyExists(byte[] key)
+        {
+            return _db.ContainsKey(key);
         }
 
         public byte[][] GetAll() => Values.Select(v => v).ToArray();
@@ -63,9 +73,14 @@ namespace Nethermind.Store
 
         public MemDb()
         {
-            _db = new Dictionary<byte[], byte[]>(1024, Bytes.EqualityComparer);
+            _db = new ConcurrentDictionary<byte[], byte[]>(Bytes.EqualityComparer);
         }
 
+        public void Clear()
+        {
+            _db.Clear();
+        }
+        
         public void Dispose()
         {
         }

@@ -21,41 +21,39 @@ using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
 using Nethermind.Network.Discovery.Messages;
-using Nethermind.Stats;
 
 namespace Nethermind.Network.Discovery.Serializers
 {
     public class FindNodeMessageSerializer : DiscoveryMessageSerializerBase, IMessageSerializer<FindNodeMessage>
     {
-        public FindNodeMessageSerializer(ISigner signer, IPrivateKeyGenerator privateKeyGenerator, IDiscoveryMessageFactory messageFactory, INodeIdResolver nodeIdResolver, INodeFactory nodeFactory) : base(signer, privateKeyGenerator, messageFactory, nodeIdResolver, nodeFactory)
+        public FindNodeMessageSerializer(IEcdsa ecdsa, IPrivateKeyGenerator privateKeyGenerator, IDiscoveryMessageFactory messageFactory, INodeIdResolver nodeIdResolver) : base(ecdsa, privateKeyGenerator, messageFactory, nodeIdResolver)
         {
         }
 
         public byte[] Serialize(FindNodeMessage message)
         {
-            byte[] typeBytes = { (byte)message.MessageType };
             byte[] data = Rlp.Encode(
                 Rlp.Encode(message.SearchedNodeId),
                 //verify if encoding is correct
                 Rlp.Encode(message.ExpirationTime)
             ).Bytes;
 
-            byte[] serializedMsg = Serialize(typeBytes, data);
+            byte[] serializedMsg = Serialize((byte) message.MessageType, data);
             return serializedMsg;
         }
 
         public FindNodeMessage Deserialize(byte[] msg)
         {
             var results = PrepareForDeserialization<FindNodeMessage>(msg);
-            Rlp.DecoderContext context = results.Data.AsRlpContext();
+            RlpStream rlpStream = results.Data.AsRlpStream();
 
-            context.ReadSequenceLength();
-            var searchedNodeId = context.DecodeByteArray();
-            var expireTime = context.DecodeLong();
+            rlpStream.ReadSequenceLength();
+            var searchedNodeId = rlpStream.DecodeByteArray();
+            var expirationTime = rlpStream.DecodeLong();
 
             var message = results.Message;
             message.SearchedNodeId = searchedNodeId;
-            message.ExpirationTime = expireTime;
+            message.ExpirationTime = expirationTime;
 
             return message;
         }

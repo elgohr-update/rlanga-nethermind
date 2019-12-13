@@ -20,87 +20,85 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using Nethermind.Db.Config;
+using Nethermind.Logging;
 using Nethermind.Store;
+using NLog.Filters;
 using RocksDbSharp;
 
 namespace Nethermind.Db
 {
-    public class DbOnTheRocks : IDb
+    public abstract class DbOnTheRocks : IDb, IDbWithSpan
     {
-        public const string StateDbPath = "state";
-        public const string CodeDbPath = "code";
-        public const string BlocksDbPath = "blocks";
-        public const string ReceiptsDbPath = "receipts";
-        public const string TxsDbPath = "txs";
-        public const string BlockInfosDbPath = "blockInfos";
-        public const string PendingTxsDbPath = "pendingtxs";
-
         private static readonly ConcurrentDictionary<string, RocksDb> DbsByPath = new ConcurrentDictionary<string, RocksDb>();
-
         private readonly RocksDb _db;
-
-        private readonly DbInstance _dbInstance;
-
         private WriteBatch _currentBatch;
+        private WriteOptions _writeOptions;
 
-        public DbOnTheRocks(string dbPath, IDbConfig dbConfig) // TODO: check column families
+        public abstract string Name { get; }
+
+        public DbOnTheRocks(string basePath, string dbPath, IDbConfig dbConfig, ILogManager logManager = null) // TODO: check column families
         {
-            if (!Directory.Exists(dbPath))
+            var fullPath = Path.Combine(basePath, dbPath);
+            var logger = logManager?.GetClassLogger();
+            if (!Directory.Exists(fullPath))
             {
-                Directory.CreateDirectory(dbPath);
+                Directory.CreateDirectory(fullPath);
+            }
+            
+            if (logger != null)
+            {
+                if (logger.IsInfo) logger.Info($"Using database directory {fullPath}");
             }
 
-            DbOptions options = BuildOptions(dbConfig);
-            _db = DbsByPath.GetOrAdd(dbPath, path => RocksDb.Open(options, path));
+            try
+            {
+                var options = BuildOptions(dbConfig);
+                _db = DbsByPath.GetOrAdd(fullPath, path => RocksDb.Open(options, path));
+            }
+            catch (DllNotFoundException e) when (e.Message.Contains("libdl"))
+            {
+                throw new ApplicationException($"Unable to load 'libdl' necessary to init the RocksDB database. Please run{Environment.NewLine}" +
+                                               "sudo apt update && sudo apt install libsnappy-dev libc6-dev libc6");
+            }
+        }
+        
+        protected abstract void UpdateReadMetrics();
+        protected abstract void UpdateWriteMetrics();
 
-            if (dbPath.EndsWith(StateDbPath))
+        private T ReadConfig<T>(IDbConfig dbConfig, string propertyName)
+        {
+            var prefixed = string.Concat(Name == "State" ? string.Empty : string.Concat(Name, "Db"),
+                propertyName);
+            try
             {
-                _dbInstance = DbInstance.State;
+                return (T) dbConfig.GetType().GetProperty(prefixed, BindingFlags.Public | BindingFlags.Instance)
+                    .GetValue(dbConfig);
             }
-            else if (dbPath.EndsWith(BlockInfosDbPath))
+            catch (Exception e)
             {
-                _dbInstance = DbInstance.BlockInfo;
-            }
-            else if (dbPath.EndsWith(BlocksDbPath))
-            {
-                _dbInstance = DbInstance.Block;
-            }
-            else if (dbPath.EndsWith(CodeDbPath))
-            {
-                _dbInstance = DbInstance.Code;
-            }
-            else if (dbPath.EndsWith(ReceiptsDbPath))
-            {
-                _dbInstance = DbInstance.Receipts;
-            }
-            else if (dbPath.EndsWith(PendingTxsDbPath))
-            {
-                _dbInstance = DbInstance.PendingTxs;
-            }
-            else
-            {
-                _dbInstance = DbInstance.Other;
+                throw new InvalidDataException($"Unable to read {prefixed} property from DB config", e);
             }
         }
 
         private DbOptions BuildOptions(IDbConfig dbConfig)
         {
-            BlockBasedTableOptions tableOptions = new BlockBasedTableOptions();
+            var tableOptions = new BlockBasedTableOptions();
             tableOptions.SetBlockSize(16 * 1024);
             tableOptions.SetPinL0FilterAndIndexBlocksInCache(true);
-            tableOptions.SetCacheIndexAndFilterBlocks(dbConfig.CacheIndexAndFilterBlocks);
+            tableOptions.SetCacheIndexAndFilterBlocks(ReadConfig<bool>(dbConfig, nameof(dbConfig.CacheIndexAndFilterBlocks)));
 
             tableOptions.SetFilterPolicy(BloomFilterPolicy.Create(10, true));
             tableOptions.SetFormatVersion(2);
 
-            ulong blockCacheSize = dbConfig.BlockCacheSize;
-            IntPtr cache = Native.Instance.rocksdb_cache_create_lru(new UIntPtr(blockCacheSize));
+            var blockCacheSize = ReadConfig<ulong>(dbConfig, nameof(dbConfig.BlockCacheSize));
+            var cache = Native.Instance.rocksdb_cache_create_lru(new UIntPtr(blockCacheSize));
             tableOptions.SetBlockCache(cache);
 
-            DbOptions options = new DbOptions();
+            var options = new DbOptions();
             options.SetCreateIfMissing(true);
-
+            options.SetAdviseRandomOnOpen(true);
             options.OptimizeForPointLookup(blockCacheSize); // I guess this should be the one option controlled by the DB size property - bind it to LRU cache size
             //options.SetCompression(CompressionTypeEnum.rocksdb_snappy_compression);
             //options.SetLevelCompactionDynamicLevelBytes(true);
@@ -116,83 +114,33 @@ namespace Nethermind.Db
             options.SetMaxBackgroundCompactions(Environment.ProcessorCount);
 
             //options.SetMaxOpenFiles(32);
-            options.SetWriteBufferSize(dbConfig.WriteBufferSize);
-            options.SetMaxWriteBufferNumber((int)dbConfig.WriteBufferNumber);
+            options.SetWriteBufferSize(ReadConfig<ulong>(dbConfig, nameof(dbConfig.WriteBufferSize)));
+            options.SetMaxWriteBufferNumber((int)ReadConfig<uint>(dbConfig, nameof(dbConfig.WriteBufferNumber)));
             options.SetMinWriteBufferNumberToMerge(2);
             options.SetBlockBasedTableFactory(tableOptions);
+            
+            options.SetMaxBackgroundFlushes(Environment.ProcessorCount);
             options.IncreaseParallelism(Environment.ProcessorCount);
+            options.SetRecycleLogFileNum(dbConfig.RecycleLogFileNum); // potential optimization for reusing allocated log files
+            
+            
 //            options.SetLevelCompactionDynamicLevelBytes(true); // only switch on on empty DBs
+            _writeOptions = new WriteOptions();
+            _writeOptions.SetSync(dbConfig.WriteAheadLogSync); // potential fix for corruption on hard process termination, may cause performance degradation
+
             return options;
         }
-
+        
         public byte[] this[byte[] key]
         {
             get
             {
-                switch (_dbInstance)
-                {
-                    case DbInstance.State:
-                        Metrics.StateDbReads++;
-                        break;
-                    case DbInstance.BlockInfo:
-                        Metrics.BlockInfosDbReads++;
-                        break;
-                    case DbInstance.Block:
-                        Metrics.BlocksDbReads++;
-                        break;
-                    case DbInstance.Code:
-                        Metrics.CodeDbReads++;
-                        break;
-                    case DbInstance.Receipts:
-                        Metrics.ReceiptsDbReads++;
-                        break;
-                    case DbInstance.PendingTxs:
-                        Metrics.PendingTxsDbReads++;
-                        break;
-                    case DbInstance.Other:
-                        Metrics.OtherDbReads++;
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException();
-                }
-
-                if (_currentBatch != null)
-                {
-                    throw new NotSupportedException("Index not needed, am I right?");
-                    //return _currentBatch.Get(key);
-                }
-
+                UpdateReadMetrics();
                 return _db.Get(key);
             }
             set
             {
-                switch (_dbInstance)
-                {
-                    case DbInstance.State:
-                        Metrics.StateDbWrites++;
-                        break;
-                    case DbInstance.BlockInfo:
-                        Metrics.BlockInfosDbWrites++;
-                        break;
-                    case DbInstance.Block:
-                        Metrics.BlocksDbWrites++;
-                        break;
-                    case DbInstance.Code:
-                        Metrics.CodeDbWrites++;
-                        break;
-                    case DbInstance.Receipts:
-                        Metrics.ReceiptsDbWrites++;
-                        break;
-                    case DbInstance.PendingTxs:
-                        Metrics.PendingTxsDbWrites++;
-                        break;
-                    case DbInstance.Other:
-                        Metrics.OtherDbWrites++;
-                        break;
-                    default:
-                        throw new ArgumentOutOfRangeException();
-                }
-
+                UpdateWriteMetrics();
                 if (_currentBatch != null)
                 {
                     if (value == null)
@@ -208,19 +156,30 @@ namespace Nethermind.Db
                 {
                     if (value == null)
                     {
-                        _db.Remove(key);
+                        _db.Remove(key, null, _writeOptions);
                     }
                     else
                     {
-                        _db.Put(key, value);
+                        _db.Put(key, value, null, _writeOptions);
                     }
                 }
             }
         }
 
+        public Span<byte> GetSpan(byte[] key)
+        {
+            UpdateReadMetrics();
+            return _db.GetSpan(key);
+        }
+
+        public void DangerousReleaseMemory(in Span<byte> span)
+        {
+            _db.DangerousReleaseMemory(in span);
+        }
+
         public void Remove(byte[] key)
         {
-            _db.Remove(key);
+            _db.Remove(key, null, _writeOptions);
         }
 
         public byte[][] GetAll()
@@ -239,6 +198,15 @@ namespace Nethermind.Db
             return values.ToArray();
         }
 
+        private byte[] _keyExistsBuffer = new byte[1];
+        
+        public bool KeyExists(byte[] key)
+        {
+            // seems it has no performance impact
+            return _db.Get(key) != null;
+//            return _db.Get(key, 32, _keyExistsBuffer, 0, 0, null, null) != -1;
+        }
+        
         public void StartBatch()
         {
             _currentBatch = new WriteBatch();
@@ -246,21 +214,9 @@ namespace Nethermind.Db
 
         public void CommitBatch()
         {
-            _db.Write(_currentBatch);
+            _db.Write(_currentBatch, _writeOptions);
             _currentBatch.Dispose();
             _currentBatch = null;
-        }        
-
-        private enum DbInstance
-        {
-            State,
-            BlockInfo,
-            Block,
-            Code,
-            Receipts,
-            Tx,
-            PendingTxs,
-            Other
         }
 
         public void Dispose()

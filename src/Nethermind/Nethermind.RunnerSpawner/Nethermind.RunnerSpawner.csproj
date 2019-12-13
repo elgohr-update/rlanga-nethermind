@@ -7,12 +7,15 @@
             .xml;
             .json;
         </AllowedReferenceRelatedFileExtensions>
-    <LangVersion>7.2</LangVersion>
+    <LangVersion>8.0</LangVersion>
   </PropertyGroup>
   <ItemGroup>
     <None Remove="spawner_discovery_large.json" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="spawner_goerli_private.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </Content>
     <ProjectReference Include="..\Nethermind.Runner\Nethermind.Runner.csproj">
       <Project>{33E2CCD2-0D52-477C-8EAC-D429F66BEAC0}</Project>
       <Name>Nethermind.Runner</Name>

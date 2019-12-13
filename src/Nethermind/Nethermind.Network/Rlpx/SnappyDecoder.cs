@@ -20,14 +20,14 @@ using System;
 using System.Collections.Generic;
 using DotNetty.Codecs;
 using DotNetty.Transport.Channels;
-using Nethermind.Core.Logging;
+using Nethermind.Core.Extensions;
+using Nethermind.Logging;
 using Snappy;
 
 namespace Nethermind.Network.Rlpx
 {
     public class SnappyDecoder : MessageToMessageDecoder<Packet>
     {
-        private const int MaxSnappyLength = 1024 * 1024 * 16;
         private readonly ILogger _logger;
 
         public SnappyDecoder(ILogger logger)
@@ -37,12 +37,12 @@ namespace Nethermind.Network.Rlpx
 
         protected override void Decode(IChannelHandlerContext context, Packet message, List<object> output)
         {
-            if (SnappyCodec.GetUncompressedLength(message.Data) > MaxSnappyLength)
+            if (SnappyCodec.GetUncompressedLength(message.Data) > SnappyParameters.MaxSnappyLength)
             {
                 throw new Exception("Max message size exceeeded"); // TODO: disconnect here
             }
 
-            if (message.Data.Length > MaxSnappyLength / 4)
+            if (message.Data.Length > SnappyParameters.MaxSnappyLength / 4)
             {
                 if (_logger.IsWarn) _logger.Warn($"Big Snappy message of length {message.Data.Length}");
             }
@@ -51,7 +51,16 @@ namespace Nethermind.Network.Rlpx
                 if (_logger.IsTrace) _logger.Trace($"Uncompressing with Snappy a message of length {message.Data.Length}");
             }
 
-            message.Data = SnappyCodec.Uncompress(message.Data);
+            try
+            {
+                message.Data = SnappyCodec.Uncompress(message.Data);
+            }
+            catch
+            {
+                _logger.Error($"{message.Data.ToHexString()}");
+                throw;
+            }
+            
             output.Add(message);
         }
     }

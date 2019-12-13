@@ -40,8 +40,18 @@ namespace Nethermind.Blockchain.Filters
         public FilterType GetFilterType(int filterId)
         {
             /* so far ok to use block filter if none */
-            _filters.TryGetValue(filterId, out FilterBase filter);
-            return filter?.GetType() == typeof(LogFilter) ? FilterType.LogFilter : FilterType.BlockFilter;
+            if (!_filters.TryGetValue(filterId, out var filter))
+            {
+                return FilterType.BlockFilter;
+            }
+
+            switch (filter)
+            {
+                case LogFilter _: return FilterType.LogFilter;
+                case BlockFilter _: return FilterType.BlockFilter;
+                case PendingTransactionFilter _: return FilterType.PendingTransactionFilter;
+                default: return FilterType.BlockFilter;
+            }
         }
 
         public T[] GetFilters<T>() where T : FilterBase
@@ -49,11 +59,18 @@ namespace Nethermind.Blockchain.Filters
             return _filters.Select(f => f.Value).OfType<T>().ToArray();
         }
 
-        public BlockFilter CreateBlockFilter(UInt256 startBlockNumber, bool setId = true)
+        public BlockFilter CreateBlockFilter(long startBlockNumber, bool setId = true)
         {
             var filterId = setId ? GetFilterId() : 0;
             var blockFilter = new BlockFilter(filterId, startBlockNumber);
             return blockFilter;
+        }
+
+        public PendingTransactionFilter CreatePendingTransactionFilter(bool setId = true)
+        {
+            var filterId = setId ? GetFilterId() : 0;
+            var pendingTransactionFilter = new PendingTransactionFilter(filterId);
+            return pendingTransactionFilter;
         }
 
         public LogFilter CreateLogFilter(FilterBlock fromBlock, FilterBlock toBlock,
@@ -109,24 +126,20 @@ namespace Nethermind.Blockchain.Filters
         {
             if (filterTopic == null)
             {
-                return new AnyTopic();
+                return AnyTopic.Instance;
             }
-
-            return new OrExpression(new[]
+            else if (filterTopic.Topic != null)
             {
-                GetTopicExpression(filterTopic.First),
-                GetTopicExpression(filterTopic.Second)
-            });
-        }
-
-        private TopicExpression GetTopicExpression(Keccak topic)
-        {
-            if (topic == null)
-            {
-                return new AnyTopic();
+                return new SpecificTopic(filterTopic.Topic);
             }
-
-            return new SpecificTopic(topic);
+            else if (filterTopic.Topics.Any())
+            {
+                return new OrExpression(filterTopic.Topics.Select(t => new SpecificTopic(t)).ToArray<TopicExpression>());
+            }
+            else
+            {
+                return AnyTopic.Instance; 
+            }
         }
 
         private static AddressFilter GetAddress(object address)
@@ -163,19 +176,29 @@ namespace Nethermind.Blockchain.Filters
                 case string topic:
                     return new FilterTopic
                     {
-                        First = new Keccak(topic)
+                        Topic = new Keccak(topic)
                     };
             }
 
-            var topics = (obj as IEnumerable<string>)?.ToList();
-            var first = topics?.FirstOrDefault();
-            var second = topics?.Skip(1).FirstOrDefault();
-
-            return new FilterTopic
+            var topics = obj as IEnumerable<string>;
+            if (topics == null)
             {
-                First = first is null ? null : new Keccak(first),
-                Second = second is null ? null : new Keccak(second)
-            };
+                return null;
+            }
+            else
+            {
+                return new FilterTopic
+                {
+                    Topics = topics.Select(t => new Keccak(t)).ToArray()
+                };
+            }
+        }
+        
+        private class FilterTopic
+        {
+            public Keccak Topic { get; set; }
+            public Keccak[] Topics { get; set; }
+        
         }
     }
 }

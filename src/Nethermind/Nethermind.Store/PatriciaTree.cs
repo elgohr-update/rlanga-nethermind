@@ -17,9 +17,11 @@
  */
 
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
@@ -44,10 +46,10 @@ namespace Nethermind.Store
         /// </summary>
         private readonly Stack<StackedNode> _nodeStack = new Stack<StackedNode>();
 
-        private static readonly ConcurrentQueue<Exception> CommitExceptions = new ConcurrentQueue<Exception>();
+        private readonly ConcurrentQueue<Exception> CommitExceptions = new ConcurrentQueue<Exception>();
 
         private readonly IDb _db;
-        private readonly bool _parallelizeBranches;
+        private readonly bool _parallelBranches;
 
         private Keccak _rootHash;
 
@@ -58,10 +60,10 @@ namespace Nethermind.Store
         {
         }
 
-        public PatriciaTree(IDb db, Keccak rootHash, bool parallelizeBranches)
+        public PatriciaTree(IDb db, Keccak rootHash, bool parallelBranches)
         {
             _db = db;
-            _parallelizeBranches = parallelizeBranches;
+            _parallelBranches = parallelBranches;
             RootHash = rootHash;
         }
 
@@ -90,9 +92,13 @@ namespace Nethermind.Store
             if (RootRef.IsDirty)
             {
                 Commit(RootRef, true);
-                while(!CurrentCommit.IsEmpty)
+                while (!CurrentCommit.IsEmpty)
                 {
-                    CurrentCommit.TryDequeue(out TrieNode node);
+                    if (!CurrentCommit.TryDequeue(out TrieNode node))
+                    {
+                        throw new ArgumentNullException($"Threading issue at {nameof(CurrentCommit)} - should not happen unless we use static objects somewhere here.");
+                    }
+
                     _db.Set(node.Keccak, node.FullRlp.Bytes);
                 }
 
@@ -102,14 +108,14 @@ namespace Nethermind.Store
             }
         }
 
-        private static readonly ConcurrentQueue<TrieNode> CurrentCommit = new ConcurrentQueue<TrieNode>();
+        private readonly ConcurrentQueue<TrieNode> CurrentCommit = new ConcurrentQueue<TrieNode>();
 
         private void Commit(TrieNode node, bool isRoot)
         {
             if (node.IsBranch)
             {
                 // idea from EthereumJ - testing parallel branches
-                if (!_parallelizeBranches || !isRoot)
+                if (!_parallelBranches || !isRoot)
                 {
                     for (int i = 0; i < 16; i++)
                     {
@@ -204,40 +210,59 @@ namespace Nethermind.Store
         [DebuggerStepThrough]
         public virtual void Set(Nibble[] nibbles, byte[] value)
         {
-            Run(nibbles.ToLooseByteArray(), value, true);
+            var input = nibbles.ToLooseByteArray();
+            Run(input, input.Length, value, true);
         }
 
-        public byte[] Get(byte[] rawKey)
+        public byte[] Get(Span<byte> rawKey)
         {
 //            byte[] value = ValueCache.Get(rawKey);
 //            if (value != null)
 //            {
 //                return value;
 //            }
-
-            return Run(Nibbles.BytesToNibbleBytes(rawKey), null, false);
+            int nibblesCount = 2 * rawKey.Length;
+            byte[] array = null;
+            Span<byte> nibbles = rawKey.Length <= 64
+                ? stackalloc byte[nibblesCount]
+                : array = ArrayPool<byte>.Shared.Rent(nibblesCount);
+            Nibbles.BytesToNibbleBytes(rawKey, nibbles);
+            var result = Run(nibbles, nibblesCount,null, false);
+            if (array != null) ArrayPool<byte>.Shared.Return(array);
+            return result;
         }
 
         [DebuggerStepThrough]
-        public void Set(byte[] rawKey, byte[] value)
+        public void Set(Span<byte> rawKey, byte[] value)
         {
 //            ValueCache.Delete(rawKey);
-            Run(Nibbles.BytesToNibbleBytes(rawKey), value, true);
+            int nibblesCount = 2 * rawKey.Length;
+            byte[] array = null;
+            Span<byte> nibbles = rawKey.Length <= 64
+                ? stackalloc byte[nibblesCount]
+                : array = ArrayPool<byte>.Shared.Rent(nibblesCount);
+            Nibbles.BytesToNibbleBytes(rawKey, nibbles);
+            Run(nibbles, nibblesCount, value, true);
+            if (array != null) ArrayPool<byte>.Shared.Return(array);
         }
 
         [DebuggerStepThrough]
-        public void Set(byte[] rawKey, Rlp value)
+        public void Set(Span<byte> rawKey, Rlp value)
         {
-//            ValueCache.Delete(rawKey);
-            Run(Nibbles.BytesToNibbleBytes(rawKey), value == null ? new byte[0] : value.Bytes, true);
+            Set(rawKey, value == null ? new byte[0] : value.Bytes);
         }
 
-        internal Rlp GetNode(Keccak keccak)
+        internal Rlp GetNode(Keccak keccak, bool allowCaching)
         {
+            if (!allowCaching)
+            {
+                return new Rlp(_db[keccak.Bytes]);
+            }
+            
             return NodeCache.Get(keccak) ?? new Rlp(_db[keccak.Bytes]);
         }
 
-        public byte[] Run(byte[] updatePath, byte[] updateValue, bool isUpdate, bool ignoreMissingDelete = true)
+        public byte[] Run(Span<byte> updatePath, int nibblesCount, byte[] updateValue, bool isUpdate, bool ignoreMissingDelete = true)
         {
             if (isUpdate)
             {
@@ -256,31 +281,31 @@ namespace Nethermind.Store
                     return null;
                 }
 
-                RootRef = TreeNodeFactory.CreateLeaf(new HexPrefix(true, updatePath), updateValue);
+                RootRef = TreeNodeFactory.CreateLeaf(new HexPrefix(true, updatePath.Slice(0, nibblesCount).ToArray()), updateValue);
                 RootRef.IsDirty = true;
                 return updateValue;
             }
 
             RootRef.ResolveNode(this);
-            TraverseContext context = new TraverseContext(updatePath, updateValue, isUpdate, ignoreMissingDelete);
-            return TraverseNode(RootRef, context);
+            TraverseContext traverseContext = new TraverseContext(updatePath.Slice(0, nibblesCount), updateValue, isUpdate, ignoreMissingDelete);
+            return TraverseNode(RootRef, traverseContext);
         }
 
-        private byte[] TraverseNode(TrieNode node, TraverseContext context)
+        private byte[] TraverseNode(TrieNode node, TraverseContext traverseContext)
         {
             if (node.IsLeaf)
             {
-                return TraverseLeaf(node, context);
+                return TraverseLeaf(node, traverseContext);
             }
 
             if (node.IsBranch)
             {
-                return TraverseBranch(node, context);
+                return TraverseBranch(node, traverseContext);
             }
 
             if (node.IsExtension)
             {
-                return TraverseExtension(node, context);
+                return TraverseExtension(node, traverseContext);
             }
 
             throw new NotImplementedException($"Unknown node type {node.NodeType}");
@@ -341,19 +366,19 @@ namespace Nethermind.Store
                             childNode.ResolveNode(this);
                             if (childNode.IsBranch)
                             {
-                                TrieNode extensionFromBranch = TreeNodeFactory.CreateExtension(new HexPrefix(false, (byte)childNodeIndex), childNode);
+                                TrieNode extensionFromBranch = TreeNodeFactory.CreateExtension(new HexPrefix(false, (byte) childNodeIndex), childNode);
                                 extensionFromBranch.IsDirty = true;
                                 nextNode = extensionFromBranch;
                             }
                             else if (childNode.IsExtension)
                             {
-                                childNode.Key = new HexPrefix(false, Bytes.Concat((byte)childNodeIndex, childNode.Path));
+                                childNode.Key = new HexPrefix(false, Bytes.Concat((byte) childNodeIndex, childNode.Path));
                                 childNode.IsDirty = true;
                                 nextNode = childNode;
                             }
                             else if (childNode.IsLeaf)
                             {
-                                childNode.Key = new HexPrefix(true, Bytes.Concat((byte)childNodeIndex, childNode.Path));
+                                childNode.Key = new HexPrefix(true, Bytes.Concat((byte) childNodeIndex, childNode.Path));
                                 childNode.IsDirty = true;
                                 nextNode = childNode;
                             }
@@ -395,16 +420,16 @@ namespace Nethermind.Store
             RootRef = nextNode;
         }
 
-        private byte[] TraverseBranch(TrieNode node, TraverseContext context)
+        private byte[] TraverseBranch(TrieNode node, TraverseContext traverseContext)
         {
-            if (context.RemainingUpdatePathLength == 0)
+            if (traverseContext.RemainingUpdatePathLength == 0)
             {
-                if (!context.IsUpdate)
+                if (!traverseContext.IsUpdate)
                 {
                     return node.Value;
                 }
 
-                if (context.UpdateValue == null)
+                if (traverseContext.UpdateValue == null)
                 {
                     if (node.Value == null)
                     {
@@ -413,75 +438,84 @@ namespace Nethermind.Store
 
                     ConnectNodes(null);
                 }
-                else if (Bytes.AreEqual(context.UpdateValue, node.Value))
+                else if (Bytes.AreEqual(traverseContext.UpdateValue, node.Value))
                 {
-                    return context.UpdateValue;
+                    return traverseContext.UpdateValue;
                 }
                 else
                 {
-                    node.Value = context.UpdateValue;
+                    node.Value = traverseContext.UpdateValue;
                     node.IsDirty = true;
                 }
 
-                return context.UpdateValue;
+                return traverseContext.UpdateValue;
             }
 
-            TrieNode childNode = node.GetChild(context.UpdatePath[context.CurrentIndex]);
-            if (context.IsUpdate)
+            TrieNode childNode = node.GetChild(traverseContext.UpdatePath[traverseContext.CurrentIndex]);
+            if (traverseContext.IsUpdate)
             {
-                _nodeStack.Push(new StackedNode(node, context.UpdatePath[context.CurrentIndex]));
+                _nodeStack.Push(new StackedNode(node, traverseContext.UpdatePath[traverseContext.CurrentIndex]));
             }
 
-            context.CurrentIndex++;
+            traverseContext.CurrentIndex++;
 
             if (childNode == null)
             {
-                if (!context.IsUpdate)
+                if (!traverseContext.IsUpdate)
                 {
                     return null;
                 }
 
-                if (context.UpdateValue == null)
+                if (traverseContext.UpdateValue == null)
                 {
-                    if (context.IgnoreMissingDelete)
+                    if (traverseContext.IgnoreMissingDelete)
                     {
                         return null;
                     }
 
-                    throw new InvalidOperationException($"Could not find the leaf node to delete: {context.UpdatePath.ToHexString(false)}");
+                    throw new InvalidOperationException($"Could not find the leaf node to delete: {traverseContext.UpdatePath.ToHexString(false)}");
                 }
 
-                byte[] leafPath = context.UpdatePath.Slice(context.CurrentIndex, context.UpdatePath.Length - context.CurrentIndex);
-                TrieNode leaf = TreeNodeFactory.CreateLeaf(new HexPrefix(true, leafPath), context.UpdateValue);
+                byte[] leafPath = traverseContext.UpdatePath.Slice(traverseContext.CurrentIndex, traverseContext.UpdatePath.Length - traverseContext.CurrentIndex).ToArray();
+                TrieNode leaf = TreeNodeFactory.CreateLeaf(new HexPrefix(true, leafPath), traverseContext.UpdateValue);
                 leaf.IsDirty = true;
                 ConnectNodes(leaf);
 
-                return context.UpdateValue;
+                return traverseContext.UpdateValue;
             }
 
             childNode.ResolveNode(this);
             TrieNode nextNode = childNode;
-            return TraverseNode(nextNode, context);
+            return TraverseNode(nextNode, traverseContext);
         }
 
-        private byte[] TraverseLeaf(TrieNode node, TraverseContext context)
+        private byte[] TraverseLeaf(TrieNode node, TraverseContext traverseContext)
         {
-            byte[] remaining = context.GetRemainingUpdatePath();
-            (byte[] shorterPath, byte[] longerPath) = context.RemainingUpdatePathLength - node.Path.Length < 0
-                ? (remaining, node.Path)
-                : (node.Path, remaining);
-
+            Span<byte> remaining = traverseContext.GetRemainingUpdatePath();
+            Span<byte> shorterPath;
+            Span<byte> longerPath;
+            if (traverseContext.RemainingUpdatePathLength - node.Path.Length < 0)
+            {
+                shorterPath = remaining;
+                longerPath = node.Path;
+            }
+            else
+            {
+                shorterPath = node.Path;
+                longerPath = remaining;
+            }
+            
             byte[] shorterPathValue;
             byte[] longerPathValue;
 
             if (Bytes.AreEqual(shorterPath, node.Path))
             {
                 shorterPathValue = node.Value;
-                longerPathValue = context.UpdateValue;
+                longerPathValue = traverseContext.UpdateValue;
             }
             else
             {
-                shorterPathValue = context.UpdateValue;
+                shorterPathValue = traverseContext.UpdateValue;
                 longerPathValue = node.Value;
             }
 
@@ -492,47 +526,47 @@ namespace Nethermind.Store
 
             if (extensionLength == shorterPath.Length && extensionLength == longerPath.Length)
             {
-                if (!context.IsUpdate)
+                if (!traverseContext.IsUpdate)
                 {
                     return node.Value;
                 }
 
-                if (context.UpdateValue == null)
+                if (traverseContext.UpdateValue == null)
                 {
                     ConnectNodes(null);
-                    return context.UpdateValue;
+                    return traverseContext.UpdateValue;
                 }
 
-                if (!Bytes.AreEqual(node.Value, context.UpdateValue))
+                if (!Bytes.AreEqual(node.Value, traverseContext.UpdateValue))
                 {
-                    node.Value = context.UpdateValue;
+                    node.Value = traverseContext.UpdateValue;
                     node.IsDirty = true;
                     ConnectNodes(node);
-                    return context.UpdateValue;
+                    return traverseContext.UpdateValue;
                 }
 
-                return context.UpdateValue;
+                return traverseContext.UpdateValue;
             }
 
-            if (!context.IsUpdate)
+            if (!traverseContext.IsUpdate)
             {
                 return null;
             }
 
-            if (context.UpdateValue == null)
+            if (traverseContext.UpdateValue == null)
             {
-                if (context.IgnoreMissingDelete)
+                if (traverseContext.IgnoreMissingDelete)
                 {
                     return null;
                 }
 
-                throw new InvalidOperationException($"Could not find the leaf node to delete: {context.UpdatePath.ToHexString(false)}");
+                throw new InvalidOperationException($"Could not find the leaf node to delete: {traverseContext.UpdatePath.ToHexString(false)}");
             }
 
             if (extensionLength != 0)
             {
-                byte[] extensionPath = longerPath.Slice(0, extensionLength);
-                TrieNode extension = TreeNodeFactory.CreateExtension(new HexPrefix(false, extensionPath));
+                Span<byte> extensionPath = longerPath.Slice(0, extensionLength);
+                TrieNode extension = TreeNodeFactory.CreateExtension(new HexPrefix(false, extensionPath.ToArray()));
                 extension.IsDirty = true;
                 _nodeStack.Push(new StackedNode(extension, 0));
             }
@@ -545,28 +579,28 @@ namespace Nethermind.Store
             }
             else
             {
-                byte[] shortLeafPath = shorterPath.Slice(extensionLength + 1, shorterPath.Length - extensionLength - 1);
-                TrieNode shortLeaf = TreeNodeFactory.CreateLeaf(new HexPrefix(true, shortLeafPath), shorterPathValue);
+                Span<byte> shortLeafPath = shorterPath.Slice(extensionLength + 1, shorterPath.Length - extensionLength - 1);
+                TrieNode shortLeaf = TreeNodeFactory.CreateLeaf(new HexPrefix(true, shortLeafPath.ToArray()), shorterPathValue);
                 shortLeaf.IsDirty = true;
                 branch.SetChild(shorterPath[extensionLength], shortLeaf);
             }
 
-            byte[] leafPath = longerPath.Slice(extensionLength + 1, longerPath.Length - extensionLength - 1);
+            Span<byte> leafPath = longerPath.Slice(extensionLength + 1, longerPath.Length - extensionLength - 1);
 
 
             node.IsDirty = true;
-            node.Key = new HexPrefix(true, leafPath);
+            node.Key = new HexPrefix(true, leafPath.ToArray());
             node.Value = longerPathValue;
 
             _nodeStack.Push(new StackedNode(branch, longerPath[extensionLength]));
             ConnectNodes(node);
 
-            return context.UpdateValue;
+            return traverseContext.UpdateValue;
         }
 
-        private byte[] TraverseExtension(TrieNode node, TraverseContext context)
+        private byte[] TraverseExtension(TrieNode node, TraverseContext traverseContext)
         {
-            byte[] remaining = context.GetRemainingUpdatePath();
+            Span<byte> remaining = traverseContext.GetRemainingUpdatePath();
             int extensionLength = 0;
             for (int i = 0; i < Math.Min(remaining.Length, node.Path.Length) && remaining[i] == node.Path[i]; i++, extensionLength++)
             {
@@ -574,25 +608,25 @@ namespace Nethermind.Store
 
             if (extensionLength == node.Path.Length)
             {
-                context.CurrentIndex += extensionLength;
-                if (context.IsUpdate)
+                traverseContext.CurrentIndex += extensionLength;
+                if (traverseContext.IsUpdate)
                 {
                     _nodeStack.Push(new StackedNode(node, 0));
                 }
 
                 TrieNode next = node.GetChild(0);
                 next.ResolveNode(this);
-                return TraverseNode(next, context);
+                return TraverseNode(next, traverseContext);
             }
 
-            if (!context.IsUpdate)
+            if (!traverseContext.IsUpdate)
             {
                 return null;
             }
 
-            if (context.UpdateValue == null)
+            if (traverseContext.UpdateValue == null)
             {
-                if (context.IgnoreMissingDelete)
+                if (traverseContext.IgnoreMissingDelete)
                 {
                     return null;
                 }
@@ -613,12 +647,12 @@ namespace Nethermind.Store
             branch.IsDirty = true;
             if (extensionLength == remaining.Length)
             {
-                branch.Value = context.UpdateValue;
+                branch.Value = traverseContext.UpdateValue;
             }
             else
             {
-                byte[] path = remaining.Slice(extensionLength + 1, remaining.Length - extensionLength - 1);
-                TrieNode shortLeaf = TreeNodeFactory.CreateLeaf(new HexPrefix(true, path), context.UpdateValue);
+                byte[] path = remaining.Slice(extensionLength + 1, remaining.Length - extensionLength - 1).ToArray();
+                TrieNode shortLeaf = TreeNodeFactory.CreateLeaf(new HexPrefix(true, path), traverseContext.UpdateValue);
                 shortLeaf.IsDirty = true;
                 branch.SetChild(remaining[extensionLength], shortLeaf);
             }
@@ -636,24 +670,24 @@ namespace Nethermind.Store
             }
 
             ConnectNodes(branch);
-            return context.UpdateValue;
+            return traverseContext.UpdateValue;
         }
 
-        private struct TraverseContext
+        private ref struct TraverseContext
         {
-            public byte[] UpdatePath { get; }
+            public Span<byte> UpdatePath { get; }
             public byte[] UpdateValue { get; }
             public bool IsUpdate { get; }
             public bool IgnoreMissingDelete { get; }
             public int CurrentIndex { get; set; }
             public int RemainingUpdatePathLength => UpdatePath.Length - CurrentIndex;
 
-            public byte[] GetRemainingUpdatePath()
+            public Span<byte> GetRemainingUpdatePath()
             {
                 return UpdatePath.Slice(CurrentIndex, RemainingUpdatePathLength);
             }
 
-            public TraverseContext(byte[] updatePath, byte[] updateValue, bool isUpdate, bool ignoreMissingDelete = true)
+            public TraverseContext(Span<byte> updatePath, byte[] updateValue, bool isUpdate, bool ignoreMissingDelete = true)
             {
                 UpdatePath = updatePath;
                 UpdateValue = updateValue;
@@ -673,6 +707,13 @@ namespace Nethermind.Store
 
             public TrieNode Node { get; }
             public int PathIndex { get; }
+        }
+
+        public void Accept(ITreeVisitor visitor, IDb codeDb)
+        {
+            VisitContext visitContext = new VisitContext();
+            visitor.VisitTree(RootHash, visitContext);
+            RootRef?.Accept(visitor, this, codeDb, visitContext);
         }
     }
 }

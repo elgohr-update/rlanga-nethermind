@@ -20,32 +20,23 @@ namespace Nethermind.Runner.Config
 {
     public class InitConfig : IInitConfig
     {
-        public bool JsonRpcEnabled { get; set; } = false;
+        public bool EnableUnsecuredDevWallet { get; set; } = false;
+        public bool KeepDevWalletInMemory { get; set; } = false;
+        public bool WebSocketsEnabled { get; set; } = false;
         public bool DiscoveryEnabled { get; set; } = true;
         public bool SynchronizationEnabled { get; set; } = true;
-        public bool NetworkEnabled { get; set; } = true;
         public bool ProcessingEnabled { get; set; } = true;
         public bool PeerManagerEnabled { get; set; } = true;
-        public bool RunAsReceiptsFiller { get; set; } = false;
         public bool IsMining { get; set; } = false;
-        public string HttpHost { get; set; } = "127.0.0.1";
-        public int HttpPort { get; set; } = 8545;
-        public int DiscoveryPort { get; set; } = 30312;
-        public int P2PPort { get; set; } = 30312;
         public string ChainSpecPath { get; set; }
+        public string ChainSpecFormat { get; set; } = "chainspec";
         public string BaseDbPath { get; set; } = "db";
-        public string TestNodeKey { get; set; }
         public string LogFileName { get; set; } = "log.txt";
         public string GenesisHash { get; set; }
-        public string[] JsonRpcEnabledModules { get; set; } = { "Eth", "Net", "Web3", "Db", "Shh", "Nethm", "Debug" };
-        public bool RemovingLogFilesEnabled { get; set; }
-        //in case of null, the path is set to ExecutingAssembly.Location\logs
+        public string StaticNodesPath { get; set; } = "Data/static-nodes.json";
         public string LogDirectory { get; set; } = null;
-        public bool LogPerfStatsOnDebug { get; set; } = false;
-        public int ReceiptsFillerStart { get; set; } = 0;
-        public int ReceiptsFillerEnd { get; set; } = 1;
-        public int ObsoletePendingTransactionInterval { get; set; } = 15;
-        public int RemovePendingTransactionInterval { get; set; } = 600;
-        public int PeerNotificationThreshold { get; set; } = 20;
+        public bool StoreTraces { get; set; } = false;
+        public bool StoreReceipts { get; set; } = true;
+        public bool EnableRc7Fix { get; set; } = false;
     }
 }

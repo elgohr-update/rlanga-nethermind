@@ -22,7 +22,7 @@ using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.Discovery.RoutingTable
 {
-    public class NodeBucket : INodeBucket
+    public class NodeBucket
     {
         private readonly object _nodeBucketLock = new object();
         private readonly SortedSet<NodeBucketItem> _items;
@@ -105,7 +105,7 @@ namespace Nethermind.Network.Discovery.RoutingTable
             {
                 var item = new NodeBucketItem(node);
                 var bucketItem = _items.FirstOrDefault(x => x.Equals(item));
-                bucketItem?.OnContactReveived();
+                bucketItem?.OnContactReceived();
             }
         }
 

@@ -1,14 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
+    <TargetFramework>netcoreapp3.0</TargetFramework>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <LangVersion>7.2</LangVersion>
+    <LangVersion>8.0</LangVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
-    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
-    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\Dirichlet\Nethermind.Dirichlet.Numerics\Nethermind.Dirichlet.Numerics.csproj" />
@@ -16,17 +16,12 @@
       <Project>{75B8BE8D-18B0-493C-8BA5-083D4B952BF9}</Project>
       <Name>Nethermind.HashLib</Name>
     </ProjectReference>
+    <ProjectReference Include="..\Nethermind.Logging\Nethermind.Logging.csproj" />
     <ProjectReference Include="..\Nethermind.Secp256k1\Nethermind.Secp256k1.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Extensions.Data.xxHash.core20" Version="1.0.2.1" />
     <PackageReference Include="Microsoft.IO.RecyclableMemoryStream" Version="1.2.2" />
-    <PackageReference Include="Newtonsoft.Json" Version="11.0.2" />
-    <PackageReference Include="NLog" Version="4.5.10" />
-  </ItemGroup>
-  <ItemGroup>
-    <Reference Include="Microsoft.IO.RecyclableMemoryStream">
-      <HintPath>C:\Users\glesniakiewicz\.nuget\packages\microsoft.io.recyclablememorystream\1.2.2\lib\netstandard1.4\Microsoft.IO.RecyclableMemoryStream.dll</HintPath>
-    </Reference>
+    <PackageReference Include="Newtonsoft.Json" Version="12.0.2" />
   </ItemGroup>
 </Project>

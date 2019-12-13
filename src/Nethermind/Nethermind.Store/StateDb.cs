@@ -29,7 +29,7 @@ namespace Nethermind.Store
     {
         private const int InitialCapacity = 4;
 
-        private readonly IDb _db;
+        internal readonly IDb _db;
 
         private int _capacity = InitialCapacity;
 
@@ -37,6 +37,8 @@ namespace Nethermind.Store
 
         private int _currentPosition = -1;
         private Dictionary<byte[], int> _pendingChanges = new Dictionary<byte[], int>(InitialCapacity, Bytes.EqualityComparer);
+        
+        public string Name { get; } = "State";
 
         public StateDb()
             :this(new MemDb())
@@ -68,6 +70,11 @@ namespace Nethermind.Store
 
         public void Remove(byte[] key)
         {
+        }
+
+        public bool KeyExists(byte[] key)
+        {
+            return _pendingChanges.ContainsKey(key) || _db.KeyExists(key);
         }
 
         public void Restore(int snapshot)
@@ -114,12 +121,12 @@ namespace Nethermind.Store
 
         private byte[] Get(byte[] key)
         {
-            if (_pendingChanges.TryGetValue(key, out int pendingCHangeIndex)) return _changes[pendingCHangeIndex].Value;
+            if (_pendingChanges.TryGetValue(key, out int pendingChangeIndex)) return _changes[pendingChangeIndex].Value;
             return _db[key];
         }
 
         /// <summary>
-        ///     Note that state DB assumes that they keys are hashes of values so trying to update values may to lead unexpected
+        ///     Note that state DB assumes that they keys are hashes of values so trying to update values may lead to unexpected
         ///     results.
         ///     If the value has already been committed to the DB then the update succeeds, otherwise it is ignored.
         /// </summary>

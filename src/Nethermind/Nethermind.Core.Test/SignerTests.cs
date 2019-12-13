@@ -19,15 +19,15 @@
 using System;
 using System.IO;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
 using Nethermind.Core.Specs;
 using Nethermind.Core.Test.Builders;
+using Nethermind.Logging;
 using NUnit.Framework;
 
 namespace Nethermind.Core.Test
 {
     [TestFixture]
-    public class SignerTests
+    public class EcdsaTEsts
     {
         [OneTimeSetUp]
         public void SetUp()
@@ -47,12 +47,12 @@ namespace Nethermind.Core.Test
         [Test]
         public void Sign_and_recover()
         {
-            EthereumSigner ethereumSigner = new EthereumSigner(OlympicSpecProvider.Instance, NullLogManager.Instance);
+            EthereumEcdsa ethereumEcdsa = new EthereumEcdsa(OlympicSpecProvider.Instance, NullLogManager.Instance);
 
             Keccak message = Keccak.Compute("Test message");
             PrivateKey privateKey = Build.A.PrivateKey.TestObject;
-            Signature signature = ethereumSigner.Sign(privateKey, message);
-            Assert.AreEqual(privateKey.Address, ethereumSigner.RecoverAddress(signature, message));
+            Signature signature = ethereumEcdsa.Sign(privateKey, message);
+            Assert.AreEqual(privateKey.Address, ethereumEcdsa.RecoverAddress(signature, message));
         }
     }
 }

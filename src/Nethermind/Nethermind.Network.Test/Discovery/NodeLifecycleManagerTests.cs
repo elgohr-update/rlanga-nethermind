@@ -22,15 +22,20 @@ using System.Net;
 using Nethermind.Config;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Core.Logging;
+using Nethermind.Core.Json;
 using Nethermind.Core.Model;
+using Nethermind.Core.Test.Builders;
+using Nethermind.Db;
 using Nethermind.KeyStore;
+using Nethermind.KeyStore.Config;
+using Nethermind.Logging;
 using Nethermind.Network.Config;
 using Nethermind.Network.Discovery;
 using Nethermind.Network.Discovery.Lifecycle;
 using Nethermind.Network.Discovery.Messages;
 using Nethermind.Network.Discovery.RoutingTable;
 using Nethermind.Stats;
+using Nethermind.Stats.Model;
 using NSubstitute;
 using NUnit.Framework;
 
@@ -39,60 +44,64 @@ namespace Nethermind.Network.Test.Discovery
     [TestFixture]
     public class NodeLifecycleManagerTests
     {
-        private const string TestPrivateKeyHex = "0x3a1076bf45ab87712ad64ccb3b10217737f7faacbf2872e88fdd9a537d8fe266";
-
         private Signature[] _signatureMocks;
-        private NodeId[] _nodeIds;
+        private PublicKey[] _nodeIds;
         private Dictionary<string, PublicKey> _signatureToNodeId;
 
+        private INetworkConfig _networkConfig = new NetworkConfig();
         private IDiscoveryManager _discoveryManager;
         private IMessageSender _udpClient;
         private INodeTable _nodeTable;
-        private INodeFactory _nodeFactory;
         private IConfigProvider _configurationProvider;
-        private ITimestamp _timestamp;
+        private ITimestamper _timestamper;
         private int _port = 1;
         private string _host = "192.168.1.27";
 
         [SetUp]
         public void Initialize()
         {
+            NetworkNodeDecoder.Init();
             SetupNodeIds();
 
             var logManager = NullLogManager.Instance;
             //setting config to store 3 nodes in a bucket and for table to have one bucket//setting config to store 3 nodes in a bucket and for table to have one bucket
 
-            _configurationProvider = new JsonConfigProvider();
-            INetworkConfig networkConfig = _configurationProvider.GetConfig<INetworkConfig>();
-            networkConfig.PongTimeout = 50;
-            networkConfig.BucketSize = 3;
-            networkConfig.BucketsCount = 1;
-
-            _nodeFactory = new NodeFactory();
-            var calculator = new NodeDistanceCalculator(_configurationProvider);
-
-            _nodeTable = new NodeTable(_nodeFactory, new FileKeyStore(_configurationProvider, new JsonSerializer(logManager), new AesEncrypter(_configurationProvider, logManager), new CryptoRandom(), logManager), calculator, _configurationProvider, logManager);
-            _nodeTable.Initialize();
+            _configurationProvider = new ConfigProvider();
+            _networkConfig.ExternalIp = "99.10.10.66";
+            _networkConfig.LocalIp = "10.0.0.5";
             
-            _timestamp = new Timestamp();
+            IDiscoveryConfig discoveryConfig = _configurationProvider.GetConfig<IDiscoveryConfig>();
+            discoveryConfig.PongTimeout = 50;
+            discoveryConfig.BucketSize = 3;
+            discoveryConfig.BucketsCount = 1;
+
+            IStatsConfig statsConfig = _configurationProvider.GetConfig<IStatsConfig>();
+
+            var calculator = new NodeDistanceCalculator(discoveryConfig);
+
+            _nodeTable = new NodeTable(calculator, discoveryConfig, _networkConfig, logManager);
+            _nodeTable.Initialize(TestItem.PublicKeyA);
+            
+            _timestamper = new Timestamper();
 
             var evictionManager = new EvictionManager(_nodeTable, logManager);
-            var lifecycleFactory = new NodeLifecycleManagerFactory(_nodeFactory, _nodeTable, new DiscoveryMessageFactory(_configurationProvider, _timestamp), evictionManager, new NodeStatsProvider(_configurationProvider.GetConfig<IStatsConfig>(), _nodeFactory, logManager), _configurationProvider, logManager);
+            var lifecycleFactory = new NodeLifecycleManagerFactory(_nodeTable, new DiscoveryMessageFactory(_timestamper), evictionManager, new NodeStatsManager(statsConfig, logManager), discoveryConfig, logManager);
 
             _udpClient = Substitute.For<IMessageSender>();
 
-            _discoveryManager = new DiscoveryManager(lifecycleFactory, _nodeFactory, _nodeTable, new NetworkStorage("test", networkConfig, logManager, new PerfService(logManager)), _configurationProvider, logManager);
+            var discoveryDb = new SimpleFilePublicKeyDb("Test","test", logManager);
+            _discoveryManager = new DiscoveryManager(lifecycleFactory, _nodeTable, new NetworkStorage(discoveryDb, logManager), discoveryConfig, logManager);
             _discoveryManager.MessageSender = _udpClient;
         }
 
         [Test]
         public void ActiveStateTest()
         {
-            var node = _nodeFactory.CreateNode(_host, _port);
+            var node = new Node(_host, _port);
             var manager = _discoveryManager.GetNodeLifecycleManager(node);
             Assert.AreEqual(NodeLifecycleState.New, manager.State);
 
-            manager.ProcessPongMessage(new PongMessage {FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port), FarPublicKey = _nodeIds[0].PublicKey });
+            manager.ProcessPongMessage(new PongMessage {FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port), FarPublicKey = _nodeIds[0] });
 
             Assert.AreEqual(NodeLifecycleState.Active, manager.State);
         }
@@ -100,7 +109,7 @@ namespace Nethermind.Network.Test.Discovery
         [Test]
         public void UnreachableStateTest()
         {
-            var node = _nodeFactory.CreateNode(_host, _port);
+            var node = new Node(_host, _port);
             var manager = _discoveryManager.GetNodeLifecycleManager(node);
             Assert.AreEqual(NodeLifecycleState.New, manager.State);
 
@@ -118,12 +127,12 @@ namespace Nethermind.Network.Test.Discovery
             for (var i = 0; i < 3; i++)
             {
                 var host = "192.168.1." + i;
-                var node = _nodeFactory.CreateNode(_nodeIds[i], host, _port);
+                var node = new Node(_nodeIds[i], host, _port);
                 var manager = _discoveryManager.GetNodeLifecycleManager(node);
                 managers.Add(manager);
                 Assert.AreEqual(NodeLifecycleState.New, manager.State);
 
-                _discoveryManager.OnIncomingMessage(new PongMessage { FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port), FarPublicKey = _nodeIds[i].PublicKey });
+                _discoveryManager.OnIncomingMessage(new PongMessage { FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port), FarPublicKey = _nodeIds[i] });
                 Assert.AreEqual(NodeLifecycleState.Active, manager.State);
             }
 
@@ -134,17 +143,17 @@ namespace Nethermind.Network.Test.Discovery
             Assert.IsTrue(closestNodes.Count(x => x.Host == managers[2].ManagedNode.Host) == 1);
 
             //adding 4th node - table can store only 3, eviction process should start
-            var candidateNode = _nodeFactory.CreateNode(_nodeIds[3], _host, _port);
+            var candidateNode = new Node(_nodeIds[3], _host, _port);
             var candidateManager = _discoveryManager.GetNodeLifecycleManager(candidateNode);
 
             Assert.AreEqual(NodeLifecycleState.New, candidateManager.State);
 
-            _discoveryManager.OnIncomingMessage(new PongMessage { FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port), FarPublicKey = _nodeIds[3].PublicKey });
+            _discoveryManager.OnIncomingMessage(new PongMessage { FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port), FarPublicKey = _nodeIds[3]});
             Assert.AreEqual(NodeLifecycleState.Active, candidateManager.State);
             var evictionCandidate = managers.First(x => x.State == NodeLifecycleState.EvictCandidate);
 
             //receiving pong for eviction candidate - should survive
-            _discoveryManager.OnIncomingMessage(new PongMessage { FarAddress = new IPEndPoint(IPAddress.Parse(evictionCandidate.ManagedNode.Host), _port), FarPublicKey = evictionCandidate.ManagedNode.Id.PublicKey });
+            _discoveryManager.OnIncomingMessage(new PongMessage { FarAddress = new IPEndPoint(IPAddress.Parse(evictionCandidate.ManagedNode.Host), _port), FarPublicKey = evictionCandidate.ManagedNode.Id });
 
             //Thread.Sleep(100);
 
@@ -174,12 +183,12 @@ namespace Nethermind.Network.Test.Discovery
             for (var i = 0; i < 3; i++)
             {
                 var host = "192.168.1." + i;
-                var node = _nodeFactory.CreateNode(_nodeIds[i], host, _port);
+                var node = new Node(_nodeIds[i], host, _port);
                 var manager = _discoveryManager.GetNodeLifecycleManager(node);
                 managers.Add(manager);
                 Assert.AreEqual(NodeLifecycleState.New, manager.State);
 
-                _discoveryManager.OnIncomingMessage(new PongMessage { FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port), FarPublicKey = _nodeIds[i].PublicKey });
+                _discoveryManager.OnIncomingMessage(new PongMessage { FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port), FarPublicKey = _nodeIds[i] });
 
                 Assert.AreEqual(NodeLifecycleState.Active, manager.State);
             }
@@ -192,14 +201,14 @@ namespace Nethermind.Network.Test.Discovery
             }
 
             //adding 4th node - table can store only 3, eviction process should start
-            var candidateNode = _nodeFactory.CreateNode(_nodeIds[3], _host, _port);
+            var candidateNode = new Node(_nodeIds[3], _host, _port);
 
             var candidateManager = _discoveryManager.GetNodeLifecycleManager(candidateNode);
             Assert.AreEqual(NodeLifecycleState.New, candidateManager.State);
             _discoveryManager.OnIncomingMessage(new PongMessage
             {
                 FarAddress = new IPEndPoint(IPAddress.Parse(_host), _port),
-                FarPublicKey = _nodeIds[3].PublicKey
+                FarPublicKey = _nodeIds[3]
             });
 
             //Thread.Sleep(10);
@@ -229,7 +238,7 @@ namespace Nethermind.Network.Test.Discovery
         {
             _signatureToNodeId = new Dictionary<string, PublicKey>();
             _signatureMocks = new Signature[4];
-            _nodeIds = new NodeId[4];
+            _nodeIds = new PublicKey[4];
 
             for (int i = 0; i < 4; i++)
             {
@@ -239,9 +248,9 @@ namespace Nethermind.Network.Test.Discovery
 
                 byte[] nodeIdBytes = new byte[64];
                 nodeIdBytes[63] = (byte)i;
-                _nodeIds[i] = new NodeId(new PublicKey(nodeIdBytes));
+                _nodeIds[i] = new PublicKey(nodeIdBytes);
 
-                _signatureToNodeId.Add(_signatureMocks[i].ToString(), _nodeIds[i].PublicKey);
+                _signatureToNodeId.Add(_signatureMocks[i].ToString(), _nodeIds[i]);
             }
         }
     }

@@ -16,13 +16,11 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using System.IO;
-
 namespace Nethermind.KeyStore.Config
 {
-    public class KeystoreConfig : IKeystoreConfig
+    public class KeyStoreConfig : IKeyStoreConfig
     {
-        public string KeyStoreDirectory { get; set; } = Path.GetDirectoryName(Path.Combine(Path.GetTempPath(), "KeyStore"));
+        public string KeyStoreDirectory { get; set; } = "keystore";
         public string KeyStoreEncoding { get; set; } = "UTF-8";
         public string Kdf { get; set; } = "scrypt";
         public string Cipher { get; set; } = "aes-128-cbc";
@@ -30,9 +28,11 @@ namespace Nethermind.KeyStore.Config
         public int KdfparamsN { get; set; } = 262144;
         public int KdfparamsP { get; set; } = 1;
         public int KdfparamsR { get; set; } = 8;
+        
         public int KdfparamsSaltLen { get; set; } = 32;
         public int SymmetricEncrypterBlockSize { get; set; } = 128;
         public int SymmetricEncrypterKeySize { get; set; } = 128;
         public int IVSize { get; set; } = 16;
+        public string TestNodeKey { get; set; }
     }
 }

@@ -17,10 +17,9 @@
  */
 
 using System.IO;
-using Nethermind.Core;
 using Nethermind.Core.Crypto;
+using Nethermind.Secp256k1;
 using Org.BouncyCastle.Crypto;
-using Org.BouncyCastle.Crypto.Agreement;
 using Org.BouncyCastle.Crypto.Digests;
 using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Macs;
@@ -44,7 +43,7 @@ namespace Nethermind.Network.Crypto
             _keyGenerator = new PrivateKeyGenerator(cryptoRandom);
         }
 
-        public byte[] Decrypt(PrivateKey privateKey, byte[] ciphertextBody, byte[] macData = null)
+        public (bool, byte[]) Decrypt(PrivateKey privateKey, byte[] ciphertextBody, byte[] macData = null)
         {
             MemoryStream inputStream = new MemoryStream(ciphertextBody);
             int ephemBytesLength = 2 * ((BouncyCrypto.DomainParameters.Curve.FieldSize + 7) / 8) + 1;
@@ -55,9 +54,13 @@ namespace Nethermind.Network.Crypto
             inputStream.Read(iv, 0, iv.Length);
             byte[] cipherBody = new byte[inputStream.Length - inputStream.Position];
             inputStream.Read(cipherBody, 0, cipherBody.Length);
+            if (ephemBytes[0] != 4) // if not a compressed public key then probably we need to use EIP8
+            {
+                return (false, null);
+            }
 
             byte[] plaintext = Decrypt(new PublicKey(ephemBytes), privateKey, iv, cipherBody, macData);
-            return plaintext;
+            return (true, plaintext);
         }
 
         public byte[] Encrypt(PublicKey recipientPublicKey, byte[] plaintext, byte[] macData)
@@ -65,9 +68,7 @@ namespace Nethermind.Network.Crypto
             byte[] iv = _cryptoRandom.GenerateRandomBytes(KeySize / 8);
             PrivateKey ephemeralPrivateKey = _keyGenerator.Generate();
 
-            ECPublicKeyParameters publicKeyParameters = BouncyCrypto.WrapPublicKey(recipientPublicKey);
-            ECPrivateKeyParameters ephemeralPrivateKeyParameters = BouncyCrypto.WrapPrivateKey(ephemeralPrivateKey);
-            EthereumIesEngine iesEngine = MakeIesEngine(true, publicKeyParameters, ephemeralPrivateKeyParameters, iv);
+            IIesEngine iesEngine = MakeIesEngine(true, recipientPublicKey, ephemeralPrivateKey, iv);
 
             try
             {
@@ -87,43 +88,28 @@ namespace Nethermind.Network.Crypto
                 throw;
             }
         }
+        
+        private OptimizedKdf _optimizedKdf = new OptimizedKdf();
 
         private byte[] Decrypt(PublicKey ephemeralPublicKey, PrivateKey privateKey, byte[] iv, byte[] ciphertextBody, byte[] macData)
+        {
+            IIesEngine iesEngine = MakeIesEngine(false, ephemeralPublicKey, privateKey, iv);
+            return iesEngine.ProcessBlock(ciphertextBody, 0, ciphertextBody.Length, macData);
+        }
+
+        private IIesEngine MakeIesEngine(bool isEncrypt, PublicKey publicKey, PrivateKey privateKey, byte[] iv)
         {
             AesEngine aesFastEngine = new AesEngine();
 
             EthereumIesEngine iesEngine = new EthereumIesEngine(
-                new ECDHBasicAgreement(),
-                new ConcatKdfBytesGenerator(new Sha256Digest()),
                 new HMac(new Sha256Digest()),
                 new Sha256Digest(),
                 new BufferedBlockCipher(new SicBlockCipher(aesFastEngine)));
 
             IesParameters iesParameters = new IesWithCipherParameters(new byte[] { }, new byte[] { }, KeySize, KeySize);
             ParametersWithIV parametersWithIV = new ParametersWithIV(iesParameters, iv);
-
-            ECPrivateKeyParameters privateKeyParameters = BouncyCrypto.WrapPrivateKey(privateKey);
-            ECPublicKeyParameters publicKeyParameters = BouncyCrypto.WrapPublicKey(ephemeralPublicKey);
-            iesEngine.Init(false, privateKeyParameters, publicKeyParameters, parametersWithIV);
-
-            return iesEngine.ProcessBlock(ciphertextBody, 0, ciphertextBody.Length, macData);
-        }
-
-        private static EthereumIesEngine MakeIesEngine(bool isEncrypt, ECPublicKeyParameters pub, ECPrivateKeyParameters prv, byte[] iv)
-        {
-            AesEngine aesFastEngine = new AesEngine();
-
-            EthereumIesEngine iesEngine = new EthereumIesEngine(
-                new ECDHBasicAgreement(),
-                new ConcatKdfBytesGenerator(new Sha256Digest()),
-                new HMac(new Sha256Digest()),
-                new Sha256Digest(),
-                new BufferedBlockCipher(new SicBlockCipher(aesFastEngine)));
-
-            IesParameters iseParameters = new IesWithCipherParameters(new byte[] { }, new byte[] { }, KeySize, KeySize);
-            ParametersWithIV parametersWithIV = new ParametersWithIV(iseParameters, iv);
-
-            iesEngine.Init(isEncrypt, prv, pub, parametersWithIV);
+            byte[] secret = Proxy.EcdhSerialized(publicKey.Bytes, privateKey.KeyBytes);
+            iesEngine.Init(isEncrypt, _optimizedKdf.Derive(secret), parametersWithIV);
             return iesEngine;
         }
     }

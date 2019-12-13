@@ -332,5 +332,18 @@ ASALocalRun/
 .localhistory/
 
 .vscode/
+ndm/
+ndm_db/
+nethermind_db/
+keystore/
+spaceneth_db/
+docs/build/
 out/
 db/
+plugins/
+src/Nethermind/Nethermind.Runner/git-hash
+src/Nethermind/Nethermind.Runner/node.key.plain
+
+# Console history
+
+src/Nethermind/Nethermind.Cli/cli.cmd.history

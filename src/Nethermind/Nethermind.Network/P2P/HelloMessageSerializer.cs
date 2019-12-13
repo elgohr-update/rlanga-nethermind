@@ -16,13 +16,10 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using System.Collections.Generic;
 using System.Linq;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Encoding;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Model;
-using Nethermind.Stats;
 using Nethermind.Stats.Model;
 
 namespace Nethermind.Network.P2P
@@ -44,13 +41,13 @@ namespace Nethermind.Network.P2P
 
         public HelloMessage Deserialize(byte[] bytes)
         {
-            Rlp.DecoderContext context = bytes.AsRlpContext();
-            context.ReadSequenceLength();
+            RlpStream rlpStream = bytes.AsRlpStream();
+            rlpStream.ReadSequenceLength();
 
             HelloMessage helloMessage = new HelloMessage();
-            helloMessage.P2PVersion = context.DecodeByte();
-            helloMessage.ClientId = context.DecodeString();
-            helloMessage.Capabilities = context.DecodeArray(ctx =>
+            helloMessage.P2PVersion = rlpStream.DecodeByte();
+            helloMessage.ClientId = rlpStream.DecodeString();
+            helloMessage.Capabilities = rlpStream.DecodeArray(ctx =>
             {
                 ctx.ReadSequenceLength();
                 string protocolCode = ctx.DecodeString();
@@ -58,8 +55,8 @@ namespace Nethermind.Network.P2P
                 return new Capability(protocolCode, version);
             }).ToList();
             
-            helloMessage.ListenPort = context.DecodeInt();
-            helloMessage.NodeId = new NodeId(new PublicKey(context.DecodeByteArray()));
+            helloMessage.ListenPort = rlpStream.DecodeInt();
+            helloMessage.NodeId = new PublicKey(rlpStream.DecodeByteArray());
             return helloMessage;
         }
     }

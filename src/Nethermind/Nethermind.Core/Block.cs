@@ -16,11 +16,13 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using Nethermind.Core.Crypto;
+using Nethermind.Core.Encoding;
 using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Core
@@ -31,15 +33,27 @@ namespace Nethermind.Core
         public enum Format
         {
             Full,
-            HashAndNumber,
+            FullHashAndNumber,
+            HashNumberAndTx,
+            HashNumberDiffAndTx,
             Short
         }
 
+        private Block()
+        {
+            Body = new BlockBody();
+        }
+
+        public Block(BlockHeader blockHeader, BlockBody body)
+        {
+            Header = blockHeader;
+            Body = body;
+        }
+        
         public Block(BlockHeader blockHeader, IEnumerable<Transaction> transactions, IEnumerable<BlockHeader> ommers)
         {
             Header = blockHeader;
-            Ommers = ommers.ToArray();
-            Transactions = transactions.ToArray();
+            Body = new BlockBody(transactions.ToArray(), ommers.ToArray());
         }
 
         public Block(BlockHeader blockHeader, params BlockHeader[] ommers)
@@ -47,46 +61,85 @@ namespace Nethermind.Core
         {
         }
 
-        public bool IsGenesis => Number == 0;
+        public bool IsGenesis => Header.IsGenesis;
 
+        public Transaction[] Transactions => Body?.Transactions;
+        
+        public BlockHeader[] Ommers => Body?.Ommers;
+        
         public BlockHeader Header { get; set; }
-        public Transaction[] Transactions { get; set; }
-        public BlockHeader[] Ommers { get; set; }
+        public BlockBody Body { get; set; }
 
         public Keccak Hash
         {
             get => Header.Hash;
             set => Header.Hash = value;
         }
-        
+
         public Keccak ParentHash
         {
             get => Header.ParentHash;
             set => Header.ParentHash = value;
         }
-        
+
+        public ulong Nonce
+        {
+            get => Header.Nonce;
+            set => Header.Nonce = value;
+        }
+
+        public Keccak MixHash
+        {
+            get => Header.MixHash;
+            set => Header.MixHash = value;
+        }
+
+        public byte[] ExtraData
+        {
+            get => Header.ExtraData;
+            set => Header.ExtraData = value;
+        }
+
+        public Bloom Bloom
+        {
+            get => Header.Bloom;
+            set => Header.Bloom = value;
+        }
+
+        public Keccak OmmersHash
+        {
+            get => Header.OmmersHash;
+            set => Header.OmmersHash = value;
+        }
+
         public Address Beneficiary
         {
             get => Header.Beneficiary;
             set => Header.Beneficiary = value;
         }
-        
+
         public Address Author
         {
             get => Header.Author;
             set => Header.Author = value;
         }
-        
+
         public Keccak StateRoot
         {
             get => Header.StateRoot;
             set => Header.StateRoot = value;
         }
-        
+
         public Keccak TransactionsRoot
         {
-            get => Header.TransactionsRoot;
-            set => Header.TransactionsRoot = value;
+            get => Header.TxRoot;
+            set => Header.TxRoot = value;
+        }
+
+        public Keccak ReceiptsRoot
+        {
+            get => Header.ReceiptsRoot;
+            set => Header.ReceiptsRoot = value;
         }
 
         public long GasLimit
@@ -107,7 +160,9 @@ namespace Nethermind.Core
             set => Header.Timestamp = value;
         }
 
-        public UInt256 Number
+        public DateTime TimestampDate => Header.TimestampDate;
+
+        public long Number
         {
             get => Header.Number;
             set => Header.Number = value;
@@ -125,27 +180,21 @@ namespace Nethermind.Core
             set => Header.TotalDifficulty = value;
         }
 
-        public UInt256? TotalTransactions
-        {
-            get => Header?.TotalTransactions;
-            set => Header.TotalTransactions = value;
-        }
-
         public string ToString(string indent)
         {
             StringBuilder builder = new StringBuilder();
             builder.AppendLine($"Block {Number}");
             builder.AppendLine("  Header:");
             builder.Append($"{Header.ToString("    ")}");
-            
+
             builder.AppendLine("  Ommers:");
-            foreach (BlockHeader ommer in Ommers)
+            foreach (BlockHeader ommer in Body.Ommers)
             {
                 builder.Append($"{ommer.ToString("    ")}");
             }
 
             builder.AppendLine("  Transactions:");
-            foreach (Transaction tx in Transactions)
+            foreach (Transaction tx in Body.Transactions)
             {
                 builder.Append($"{tx.ToString("    ")}");
             }
@@ -164,7 +213,7 @@ namespace Nethermind.Core
             {
                 case Format.Full:
                     return ToString(string.Empty);
-                case Format.HashAndNumber:
+                case Format.FullHashAndNumber:
                     if (Hash == null)
                     {
                         return $"{Number} null";
@@ -173,15 +222,31 @@ namespace Nethermind.Core
                     {
                         return $"{Number} ({Hash})";
                     }
+                case Format.HashNumberAndTx:
+                    if (Hash == null)
+                    {
+                        return $"{Number} null, tx count: {Body.Transactions.Length}";
+                    }
+                    else
+                    {
+                        return $"{Number} {TimestampDate:HH:mm:ss} ({Hash?.ToShortString()}), tx count: {Body.Transactions.Length}";
+                    }
+                case Format.HashNumberDiffAndTx:
+                    if (Hash == null)
+                    {
+                        return $"{Number} null, diff: {Difficulty}, tx count: {Body.Transactions.Length}";
+                    }
+                    else
+                    {
+                        return $"{Number} ({Hash?.ToShortString()}), diff: {Difficulty}, tx count: {Body.Transactions.Length}";
+                    }
                 default:
                     if (Hash == null)
                     {
                         return $"{Number} null";
                     }
-                    else
-                    {
-                        return $"{Number} ({Hash.ToString().Substring(60, 6)})";
-                    }
+
+                    return $"{Number} ({Hash?.ToShortString()})";
             }
         }
     }

@@ -16,9 +16,11 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using System.Numerics;
 using Nethermind.Core.Crypto;
+using Nethermind.Core.Specs;
+using Nethermind.Core.Specs.Forks;
 using Nethermind.Dirichlet.Numerics;
+using Nethermind.Logging;
 
 namespace Nethermind.Core.Test.Builders
 {
@@ -29,7 +31,7 @@ namespace Nethermind.Core.Test.Builders
             TestObjectInternal = new Transaction();
             TestObjectInternal.GasPrice = 1;
             TestObjectInternal.GasLimit = 21000;
-            TestObjectInternal.To = Build.An.Address.FromNumber(1).TestObject;
+            TestObjectInternal.To = Address.Zero;
             TestObjectInternal.Nonce = 0;
             TestObjectInternal.Value = 1;
             TestObjectInternal.Data = new byte[0];
@@ -60,13 +62,19 @@ namespace Nethermind.Core.Test.Builders
             return this;
         }
         
+        public TransactionBuilder WithInit(byte[] initCode)
+        {
+            TestObjectInternal.Init = initCode;
+            return this;
+        }
+        
         public TransactionBuilder WithGasPrice(UInt256 gasPrice)
         {
             TestObjectInternal.GasPrice = gasPrice;
             return this;
         }
         
-        public TransactionBuilder WithGasLimit(UInt256 gasLimit)
+        public TransactionBuilder WithGasLimit(long gasLimit)
         {
             TestObjectInternal.GasLimit = gasLimit;
             return this;
@@ -78,17 +86,37 @@ namespace Nethermind.Core.Test.Builders
             return this;
         }
         
-        public TransactionBuilder Signed(IEthereumSigner signer, PrivateKey privateKey, UInt256 blockNumber)
+        public TransactionBuilder WithValue(UInt256 value)
         {
-            signer.Sign(privateKey, TestObjectInternal, blockNumber);
+            TestObjectInternal.Value = value;
+            return this;
+        }
+        
+        public TransactionBuilder WithSenderAddress(Address address)
+        {
+            TestObjectInternal.SenderAddress = address;
+            return this;
+        }
+        
+        public TransactionBuilder Signed(IEthereumEcdsa ecdsa, PrivateKey privateKey, long blockNumber)
+        {
+            ecdsa.Sign(privateKey, TestObjectInternal, blockNumber);
             return this;
         }
 
-        // TODO: auto create signer here
-        public TransactionBuilder SignedAndResolved(IEthereumSigner signer, PrivateKey privateKey, UInt256 blockNumber)
+        // TODO: auto create ecdsa here
+        public TransactionBuilder SignedAndResolved(IEthereumEcdsa ecdsa, PrivateKey privateKey, long blockNumber)
         {
-            signer.Sign(privateKey, TestObjectInternal, blockNumber);
+            ecdsa.Sign(privateKey, TestObjectInternal, blockNumber);
             TestObjectInternal.SenderAddress = privateKey.Address;
+            return this;
+        }
+        
+        public TransactionBuilder SignedAndResolved()
+        {
+            EthereumEcdsa ecdsa = new EthereumEcdsa(MainNetSpecProvider.Instance, LimboLogs.Instance);
+            ecdsa.Sign(TestItem.IgnoredPrivateKey, TestObjectInternal, 10000000);
+            TestObjectInternal.SenderAddress = TestItem.IgnoredPrivateKey.Address;
             return this;
         }
 

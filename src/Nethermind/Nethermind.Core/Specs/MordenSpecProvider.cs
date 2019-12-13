@@ -16,17 +16,15 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Core.Specs.Forks;
 
 namespace Nethermind.Core.Specs
 {
     public class MordenSpecProvider : ISpecProvider
     {
-        public IReleaseSpec CurrentSpec => SpuriousDragon.Instance;
-
         public IReleaseSpec GenesisSpec => Frontier.Instance;
 
-        public IReleaseSpec GetSpec(UInt256 blockNumber)
+        public IReleaseSpec GetSpec(long blockNumber)
         {
             if (blockNumber < 494000)
             {
@@ -41,7 +39,7 @@ namespace Nethermind.Core.Specs
             return SpuriousDragon.Instance;
         }
         
-        public UInt256? DaoBlockNumber { get; } = null;
+        public long? DaoBlockNumber { get; } = null;
 
         public int ChainId => 2;
     }

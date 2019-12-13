@@ -21,50 +21,58 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Nethermind.Core;
-using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
+using Nethermind.Logging;
 using Nethermind.Store;
 
 namespace Nethermind.Db
 {
     public class SimpleFilePublicKeyDb : IFullDb
     {
-        private readonly ILogger _logger;
-        private readonly IPerfService _perfService;
-        private ConcurrentDictionary<PublicKey, byte[]> _cache;
-        private const string DbName = "SimpleFileDb.db";
-        private readonly string _dbPath;
-        private readonly string _dbLastDirName;
-        private bool _anyPendingChanges;
+        public const string DbFileName = "SimpleFileDb.db";
+     
+        private ILogger _logger;
+        private bool _hasPendingChanges;
+        private ConcurrentDictionary<byte[], byte[]> _cache;
 
-        public SimpleFilePublicKeyDb(string dbDirectoryPath, ILogManager logManager, IPerfService perfService)
+        public string DbPath { get; }
+        public string Name { get; }
+        public string Description { get; }
+        
+        public ICollection<byte[]> Keys => _cache.Keys.ToArray();
+        public ICollection<byte[]> Values => _cache.Values;
+
+        public SimpleFilePublicKeyDb(string name, string dbDirectoryPath, ILogManager logManager)
         {
-            _perfService = perfService;
-            _dbPath = Path.Combine(dbDirectoryPath, DbName);
-            _logger = logManager.GetClassLogger();
+            _logger = logManager.GetClassLogger() ?? throw new ArgumentNullException(nameof(logManager));
+            if (dbDirectoryPath == null) throw new ArgumentNullException(nameof(dbDirectoryPath));
+            Name = name ?? throw new ArgumentNullException(nameof(name));
+            DbPath = Path.Combine(dbDirectoryPath, DbFileName);
+            Description = $"{Name}|{DbPath}";
+            
             if (!Directory.Exists(dbDirectoryPath))
             {
                 Directory.CreateDirectory(dbDirectoryPath);
             }
-            _dbLastDirName = new DirectoryInfo(dbDirectoryPath).Name;
+            
             LoadData();
         }
 
         public byte[] this[byte[] key]
         {
-            get => _cache[new PublicKey(key)];
-            set
-            {
-                _cache.AddOrUpdate(new PublicKey(key), newValue => Add(value), (x, oldValue) => Update(oldValue, value));
-            }
+            get => _cache[key];
+            set { _cache.AddOrUpdate(key, newValue => Add(value), (x, oldValue) => Update(oldValue, value)); }
         }
 
         public void Remove(byte[] key)
         {
-            _anyPendingChanges = true;
-            _cache.TryRemove(new PublicKey(key), out _);
+            _hasPendingChanges = true;
+            _cache.TryRemove(key, out _);
+        }
+
+        public bool KeyExists(byte[] key)
+        {
+            return _cache.ContainsKey(key);
         }
 
         public byte[][] GetAll() => _cache.Values.Select(v => v).ToArray();
@@ -75,103 +83,109 @@ namespace Nethermind.Db
 
         public void CommitBatch()
         {
-            if (!_anyPendingChanges)
+            if (!_hasPendingChanges)
             {
-                if (_logger.IsTrace) _logger.Trace($"Skipping commit ({_dbLastDirName}), no changes");
+                if (_logger.IsTrace) _logger.Trace($"Skipping commit ({Name}), no changes");
                 return;
             }
 
-            var key = _perfService.StartPerfCalc();
-
-            var tempFilePath = CreateBackup();
-
-            _anyPendingChanges = false;
-            var snapshot = _cache.ToArray();
-
-            using (var streamWriter = new StreamWriter(_dbPath))
+            using (Backup backup = new Backup(DbPath, _logger))
             {
-                foreach (var keyValuePair in snapshot)
+                _hasPendingChanges = false;
+                var snapshot = _cache.ToArray();
+
+                if (_logger.IsDebug) _logger.Debug($"Saving data in {DbPath} | backup stored in {backup.BackupPath}");
+                try
                 {
-                    streamWriter.WriteLine($"{keyValuePair.Key},{keyValuePair.Value.ToHexString()}");
+                    using (var streamWriter = new StreamWriter(DbPath))
+                    {
+                        foreach (var keyValuePair in snapshot)
+                        {
+                            keyValuePair.Key.StreamHex(streamWriter);
+                            streamWriter.Write(',');
+                            keyValuePair.Value.StreamHex(streamWriter);
+                            streamWriter.WriteLine();
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    _logger.Error($"Failed to store data in {DbPath}", e);
                 }
             }
-
-            RemoveBackup(tempFilePath);
-
-            _perfService.EndPerfCalc(key, $"Db commit ({_dbLastDirName}), items count: {snapshot.Length}");
         }
 
-        private void RemoveBackup(string tempFilePath)
+        private class Backup : IDisposable
         {
-            try
+            private string _dbPath;
+            private ILogger _logger;
+            
+            public string BackupPath { get; }
+
+            public Backup(string dbPath, ILogger logger)
             {
-                if (tempFilePath != null && File.Exists(tempFilePath))
+                _dbPath = dbPath;
+                _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+                try
                 {
-                    File.Delete(tempFilePath);
+                    BackupPath = $"{_dbPath}_{Guid.NewGuid().ToString()}";
+
+                    if (File.Exists(_dbPath))
+                    {
+                        File.Move(_dbPath, BackupPath);
+                    }
+                }
+                catch (Exception e)
+                {
+                    if (_logger.IsError) _logger.Error($"Error during backup creation for {_dbPath} | backup path {BackupPath}", e);
                 }
             }
-            catch (Exception e)
-            {
-                if (_logger.IsError) _logger.Error($"Error during backup removal: {_dbPath}, tempFilePath: {tempFilePath}", e);
-            }
-        }
 
-        private string CreateBackup()
-        {
-            try
+            public void Dispose()
             {
-                var tempFilePath = $"{_dbPath}_{Guid.NewGuid().ToString()}";
-
-                if (File.Exists(_dbPath))
+                try
                 {
-                    File.Move(_dbPath, tempFilePath);
-                    return tempFilePath;
+                    if (BackupPath != null && File.Exists(BackupPath))
+                    {
+                        File.Delete(BackupPath);
+                    }
                 }
-
-                return null;
-            }
-            catch (Exception e)
-            {
-                if (_logger.IsError) _logger.Error($"Error during backup creation: {_dbPath}", e);
-                return null;
+                catch (Exception e)
+                {
+                    if (_logger.IsError) _logger.Error($"Error during backup removal of {_dbPath} | backup path {BackupPath}", e);
+                }
             }
         }
-
-        public ICollection<byte[]> Keys => _cache.Keys.Select(x => x.Bytes).ToArray();
-        public ICollection<byte[]> Values => _cache.Values;
 
         private void LoadData()
         {
-            var key = _perfService.StartPerfCalc();
+            _cache = new ConcurrentDictionary<byte[], byte[]>(Bytes.EqualityComparer);
 
-            _cache = new ConcurrentDictionary<PublicKey, byte[]>();
-
-            if (!File.Exists(_dbPath))
+            if (!File.Exists(DbPath))
             {
                 return;
             }
 
-            var lines = File.ReadAllLines(_dbPath);
-            foreach (var line in lines)
+            var lines = File.ReadAllLines(DbPath);
+            foreach (string line in lines)
             {
                 var values = line.Split(",");
                 if (values.Length != 2)
                 {
-                    if (_logger.IsError) _logger.Error($"Error in data file, too many items: {line}");
+                    if (_logger.IsError) _logger.Error($"Error when loading data from {Name} - expected two items separated by a comma and got '{line}')");
                     continue;
                 }
 
-                _cache[new PublicKey(values[0])] = Bytes.FromHexString(values[1]);
+                _cache[Bytes.FromHexString(values[0])] = Bytes.FromHexString(values[1]);
             }
-
-            _perfService.EndPerfCalc(key, $"Db load ({_dbLastDirName}), items count: {lines.Length}");
         }
 
         private byte[] Update(byte[] oldValue, byte[] newValue)
         {
             if (!Bytes.AreEqual(oldValue, newValue))
             {
-                _anyPendingChanges = true;
+                _hasPendingChanges = true;
             }
 
             return newValue;
@@ -179,7 +193,7 @@ namespace Nethermind.Db
 
         private byte[] Add(byte[] value)
         {
-            _anyPendingChanges = true;
+            _hasPendingChanges = true;
             return value;
         }
 

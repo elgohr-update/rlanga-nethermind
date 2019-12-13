@@ -24,26 +24,35 @@ namespace Nethermind.Core.Test.Builders
     public class BlockHeaderBuilder : BuilderBase<BlockHeader>
     {
         public static UInt256 DefaultDifficulty = 1_000_000;
-        
+
+        protected override void BeforeReturn()
+        {
+            if (!_doNotCalculateHash)
+            {
+                TestObjectInternal.Hash = BlockHeader.CalculateHash(TestObjectInternal);
+            }
+
+            base.BeforeReturn();
+        }
+
         public BlockHeaderBuilder()
         {
             TestObjectInternal = new BlockHeader(
-                                     Keccak.Compute("parent"),
-                                     Keccak.OfAnEmptySequenceRlp,
-                                     Address.Zero,
-                                     DefaultDifficulty, 0,
-                                     4_000_000,
-                                     1_000_000,
-                                     new byte[] {1, 2, 3});
-            TestObjectInternal.Bloom = new Bloom();
+                Keccak.Compute("parent"),
+                Keccak.OfAnEmptySequenceRlp,
+                Address.Zero,
+                DefaultDifficulty, 0,
+                4_000_000,
+                1_000_000,
+                new byte[] {1, 2, 3});
+            TestObjectInternal.Bloom = Bloom.Empty;
             TestObjectInternal.MixHash = Keccak.Compute("mix_hash");
-            TestObjectInternal.Nonce = 1000;
+            TestObjectInternal.Nonce = 1000;            
             TestObjectInternal.ReceiptsRoot = Keccak.EmptyTreeHash;
             TestObjectInternal.StateRoot = Keccak.EmptyTreeHash;
-            TestObjectInternal.TransactionsRoot = Keccak.EmptyTreeHash;
-            TestObjectInternal.Hash = BlockHeader.CalculateHash(TestObjectInternal);
+            TestObjectInternal.TxRoot = Keccak.EmptyTreeHash;
         }
-        
+
         public BlockHeaderBuilder WithParent(BlockHeader parentHeader)
         {
             TestObjectInternal.ParentHash = parentHeader.Hash;
@@ -51,12 +60,21 @@ namespace Nethermind.Core.Test.Builders
             TestObjectInternal.GasLimit = parentHeader.GasLimit;
             return this;
         }
-        
+
         public BlockHeaderBuilder WithParentHash(Keccak parentHash)
         {
             TestObjectInternal.ParentHash = parentHash;
             return this;
         }
+
+        public BlockHeaderBuilder WithHash(Keccak hash)
+        {
+            TestObjectInternal.Hash = hash;
+            _doNotCalculateHash = true;
+            return this;
+        }
+
+        private bool _doNotCalculateHash;
 
         public BlockHeaderBuilder WithOmmersHash(Keccak ommersHash)
         {
@@ -75,7 +93,7 @@ namespace Nethermind.Core.Test.Builders
             TestObjectInternal.Author = address;
             return this;
         }
-        
+
         public BlockHeaderBuilder WithBloom(Bloom bloom)
         {
             TestObjectInternal.Bloom = bloom;
@@ -90,10 +108,10 @@ namespace Nethermind.Core.Test.Builders
 
         public BlockHeaderBuilder WithTransactionsRoot(Keccak transactionsRoot)
         {
-            TestObjectInternal.TransactionsRoot = transactionsRoot;
+            TestObjectInternal.TxRoot = transactionsRoot;
             return this;
         }
-        
+
         public BlockHeaderBuilder WithReceiptsRoot(Keccak receiptsRoot)
         {
             TestObjectInternal.ReceiptsRoot = receiptsRoot;
@@ -106,7 +124,7 @@ namespace Nethermind.Core.Test.Builders
             return this;
         }
 
-        public BlockHeaderBuilder WithNumber(UInt256 blockNumber)
+        public BlockHeaderBuilder WithNumber(long blockNumber)
         {
             TestObjectInternal.Number = blockNumber;
             return this;
@@ -145,6 +163,13 @@ namespace Nethermind.Core.Test.Builders
         public BlockHeaderBuilder WithNonce(ulong nonce)
         {
             TestObjectInternal.Nonce = nonce;
+            return this;
+        }
+        
+        public BlockHeaderBuilder WithAura(long step, byte[] signature)
+        {
+            TestObjectInternal.AuRaStep = step;
+            TestObjectInternal.AuRaSignature = signature;
             return this;
         }
     }

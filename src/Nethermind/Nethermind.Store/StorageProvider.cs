@@ -21,33 +21,30 @@ using System.Collections.Generic;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
 using Nethermind.Core.Extensions;
-using Nethermind.Core.Logging;
-using Nethermind.Core.Specs;
+using Nethermind.Logging;
 
 namespace Nethermind.Store
 {
     public class StorageProvider : IStorageProvider
     {
-        internal const int StartCapacity = 16;
-
-        private Dictionary<StorageAddress, Stack<int>> _intraBlockCache = new Dictionary<StorageAddress, Stack<int>>(StartCapacity);
+        private ResettableDictionary<StorageAddress, Stack<int>> _intraBlockCache = new ResettableDictionary<StorageAddress, Stack<int>>();
 
         /// <summary>
         /// EIP-1283
         /// </summary>
-        private Dictionary<StorageAddress, byte[]> _originalValues = new Dictionary<StorageAddress, byte[]>();
+        private ResettableDictionary<StorageAddress, byte[]> _originalValues = new ResettableDictionary<StorageAddress, byte[]>();
 
-        private HashSet<StorageAddress> _committedThisRound = new HashSet<StorageAddress>();
+        private ResettableHashSet<StorageAddress> _committedThisRound = new ResettableHashSet<StorageAddress>();
 
         private readonly ILogger _logger;
 
         private readonly ISnapshotableDb _stateDb;
         private readonly IStateProvider _stateProvider;
 
-        private Dictionary<Address, StorageTree> _storages = new Dictionary<Address, StorageTree>(StartCapacity);
+        private ResettableDictionary<Address, StorageTree> _storages = new ResettableDictionary<Address, StorageTree>();
 
-        private int _capacity = StartCapacity;
-        private Change[] _changes = new Change[StartCapacity];
+        private int _capacity = Resettable.StartCapacity;
+        private Change[] _changes = new Change[Resettable.StartCapacity];
         private int _currentPosition = -1;
 
         public StorageProvider(ISnapshotableDb stateDb, IStateProvider stateProvider, ILogManager logManager)
@@ -154,7 +151,32 @@ namespace Nethermind.Store
             }
         }
 
-        public void Commit(IReleaseSpec spec)
+        public void Commit()
+        {
+            Commit(null);
+        }
+
+        private static byte[] _zeroValue = {0}; 
+        
+        private struct ChangeTrace
+        {
+            public ChangeTrace(byte[] before, byte[] after)
+            {
+                After = after ?? _zeroValue;
+                Before = before ?? _zeroValue;
+            }
+            
+            public ChangeTrace(byte[] after)
+            {
+                After = after ?? _zeroValue;
+                Before = _zeroValue;
+            }
+            
+            public byte[] Before { get; }
+            public byte[] After { get; }
+        }
+        
+        public void Commit(IStorageTracer tracer)
         {
             if (_currentPosition == -1)
             {
@@ -176,11 +198,23 @@ namespace Nethermind.Store
 
             HashSet<Address> toUpdateRoots = new HashSet<Address>();
 
+            bool isTracing = tracer != null;
+            Dictionary<StorageAddress, ChangeTrace> trace = null;
+            if (isTracing)
+            {
+                trace = new Dictionary<StorageAddress, ChangeTrace>();
+            }
+            
             for (int i = 0; i <= _currentPosition; i++)
             {
                 Change change = _changes[_currentPosition - i];
                 if (_committedThisRound.Contains(change.StorageAddress))
                 {
+                    if (isTracing && change.ChangeType == ChangeType.JustCache)
+                    {
+                        trace[change.StorageAddress] = new ChangeTrace(change.Value, trace[change.StorageAddress].After);
+                    }
+                    
                     continue;
                 }
 
@@ -221,6 +255,10 @@ namespace Nethermind.Store
                         Metrics.StorageTreeWrites++;
                         toUpdateRoots.Add(change.StorageAddress.Address);
                         tree.Set(change.StorageAddress.Index, change.Value);
+                        if (isTracing)
+                        {
+                            trace[change.StorageAddress] = new ChangeTrace(change.Value);
+                        }
                         break;
                     default:
                         throw new ArgumentOutOfRangeException();
@@ -236,14 +274,32 @@ namespace Nethermind.Store
                     _stateProvider.UpdateStorageRoot(address, root);
                 }
             }
-
-            _capacity = Math.Max(StartCapacity, _capacity / 2);
-            _changes = new Change[_capacity];
+            
             _currentPosition = -1;
-            _committedThisRound = new HashSet<StorageAddress>(Math.Max(StartCapacity, _committedThisRound.Count / 2));
-            _intraBlockCache = new Dictionary<StorageAddress, Stack<int>>(Math.Max(StartCapacity, _intraBlockCache.Count / 2));
-            _originalValues = new Dictionary<StorageAddress, byte[]>(Math.Max(StartCapacity, _originalValues.Count / 2));
+            Resettable.Reset(ref _changes, ref _capacity);
+            _committedThisRound.Reset();
+            _intraBlockCache.Reset();
+            _originalValues.Reset();
 //            _destructedStorages.Clear();
+            
+            if (isTracing)
+            {
+                ReportChanges(tracer, trace);
+            }
+        }
+        
+        private void ReportChanges(IStorageTracer tracer, Dictionary<StorageAddress, ChangeTrace> trace)
+        {
+            foreach ((StorageAddress address, ChangeTrace change) in trace)
+            {
+                byte[] before = change.Before;
+                byte[] after = change.After;
+                
+                if (!Bytes.AreEqual(before, after))
+                {
+                    tracer.ReportStorageChange(address, before, after);
+                }
+            }
         }
 
         public void Reset()
@@ -255,7 +311,7 @@ namespace Nethermind.Store
             _currentPosition = -1;
             _committedThisRound.Clear();
             Array.Clear(_changes, 0, _changes.Length);
-            _storages.Clear();
+            _storages.Reset();
 //            _destructedStorages.Clear();
         }
 
@@ -280,7 +336,7 @@ namespace Nethermind.Store
             }
 
             // only needed here as there is no control over cached storage size otherwise
-            _storages = new Dictionary<Address, StorageTree>(StartCapacity);
+            _storages.Reset();
         }
 
         private StorageTree GetOrCreateStorage(Address address)

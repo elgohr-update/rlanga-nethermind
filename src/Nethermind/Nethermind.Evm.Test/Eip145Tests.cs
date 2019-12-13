@@ -16,10 +16,9 @@
  * along with the Nethermind. If not, see <http://www.gnu.org/licenses/>.
  */
 
-using Nethermind.Core;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs;
-using Nethermind.Dirichlet.Numerics;
+using Nethermind.Evm.Tracing;
 using NUnit.Framework;
 
 namespace Nethermind.Evm.Test
@@ -27,25 +26,27 @@ namespace Nethermind.Evm.Test
     [TestFixture]
     public class Eip145Tests : VirtualMachineTestsBase
     {
-        protected override UInt256 BlockNumber => MainNetSpecProvider.ConstantinopleBlockNumber;
+        protected override long BlockNumber => RopstenSpecProvider.ConstantinopleBlockNumber;
+        
+        protected override ISpecProvider SpecProvider => RopstenSpecProvider.Instance;
 
-        private void AssertEip145(TransactionReceipt receipt, byte result)
+        private void AssertEip145(CallOutputTracer receipt, byte result)
         {
             AssertEip145(receipt, new[] {result});
         }
 
-        private void AssertEip145(TransactionReceipt receipt, string result)
+        private void AssertEip145(CallOutputTracer receipt, string result)
         {
             AssertEip145(receipt, Bytes.FromHexString(result));
         }
         
-        private void AssertEip145(TransactionReceipt receipt, byte[] result)
+        private void AssertEip145(CallOutputTracer receipt, byte[] result)
         {
             AssertStorage(0, result);
             AssertGas(receipt, result.IsZero() ? ZeroResultGas : NonZeroResultGas);
         }
 
-        private const long ZeroResultGas = GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SStoreEip1283;
+        private const long ZeroResultGas = GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SStoreNetMeteredEip1283;
         private const long NonZeroResultGas = GasCostOf.Transaction + 4 * GasCostOf.VeryLow + GasCostOf.SSet;
 
         [TestCase("0x0000000000000000000000000000000000000000000000000000000000000001", "0x00", "0x0000000000000000000000000000000000000000000000000000000000000001")]
@@ -69,7 +70,7 @@ namespace Nethermind.Evm.Test
                 .Op(Instruction.SSTORE)
                 .Done;
 
-            TransactionReceipt receipt = Execute(code);
+            var receipt = Execute(code);
             AssertEip145(receipt, result);
         }
         
@@ -94,7 +95,7 @@ namespace Nethermind.Evm.Test
                 .Op(Instruction.SSTORE)
                 .Done;
 
-            TransactionReceipt receipt = Execute(code);
+            CallOutputTracer receipt = Execute(code);
             AssertEip145(receipt, result);
         }
         
@@ -124,7 +125,7 @@ namespace Nethermind.Evm.Test
                 .Op(Instruction.SSTORE)
                 .Done;
 
-            TransactionReceipt receipt = Execute(code);
+            CallOutputTracer receipt = Execute(code);
             AssertEip145(receipt, result);
         }
     }

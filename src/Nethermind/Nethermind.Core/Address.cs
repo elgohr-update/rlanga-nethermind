@@ -33,11 +33,17 @@ namespace Nethermind.Core
         private const int PrefixedHexCharsCount = 2 + HexCharsCount; // 0x5a4eab120fb44eb6684e5e32785702ff45ea344d
         
         public static Address Zero { get; } = new Address(new byte[ByteLength]);
+        public static Address SystemUser { get; } = new Address("0xfffffffffffffffffffffffffffffffffffffffe");
         
         public byte[] Bytes { get; }
 
         public Address(Keccak keccak)
             : this(keccak.Bytes.Slice(12, ByteLength))
+        {
+        }
+        
+        public Address(in ValueKeccak keccak)
+            : this(keccak.BytesAsSpan.Slice(12, ByteLength).ToArray())
         {
         }
 
@@ -109,20 +115,22 @@ namespace Nethermind.Core
             return Nethermind.Core.Extensions.Bytes.AreEqual(Bytes, other.Bytes);
         }
 
-        public static Address FromNumber(BigInteger number)
+        public static Address FromNumber(UInt256 number)
         {
-            return new Address(number.ToBigEndianByteArray(20));
+            byte[] addressBytes = new byte[20];
+            number.ToBigEndian(addressBytes);
+            return new Address(addressBytes);
         }
 
         public static Address OfContract(Address deployingAddress, UInt256 nonce)
         {
-            Keccak contractAddressKeccak =
-                Keccak.Compute(
+            ValueKeccak contractAddressKeccak =
+                ValueKeccak.Compute(
                     Rlp.Encode(
                         Rlp.Encode(deployingAddress),
-                        Rlp.Encode(nonce)));
+                        Rlp.Encode(nonce)).Bytes);
 
-            return new Address(contractAddressKeccak);
+            return new Address(in contractAddressKeccak);
         }
         
         public static Address OfContract(Address deployingAddress, Span<byte> salt, Span<byte> initCode)
@@ -132,15 +140,15 @@ namespace Nethermind.Core
             bytes[0] = 0xff;
             deployingAddress.Bytes.CopyTo(bytes.Slice(1, 20));
             salt.CopyTo(bytes.Slice(21, salt.Length));
-            Keccak.Compute(initCode).Bytes.CopyTo(bytes.Slice(21 + salt.Length, 32));
+            ValueKeccak.Compute(initCode).BytesAsSpan.CopyTo(bytes.Slice(21 + salt.Length, 32));
                 
-            Keccak contractAddressKeccak = Keccak.Compute(bytes);
-            return new Address(contractAddressKeccak);
+            ValueKeccak contractAddressKeccak = ValueKeccak.Compute(bytes);
+            return new Address(in contractAddressKeccak);
         }
 
         public override string ToString()
         {
-            return ToString(false);
+            return ToString(true, false);
         }
 
         /// <summary>
@@ -149,7 +157,16 @@ namespace Nethermind.Core
         /// <returns></returns>
         public string ToString(bool withEip55Checksum)
         {
-            return Bytes.ToHexString(true, false, withEip55Checksum);
+            return ToString(true, withEip55Checksum);
+        }
+        
+        /// <summary>
+        ///     https://github.com/ethereum/EIPs/issues/55
+        /// </summary>
+        /// <returns></returns>
+        public string ToString(bool withZeroX, bool withEip55Checksum)
+        {
+            return Bytes.ToHexString(withZeroX, false, withEip55Checksum);
         }
 
         public override bool Equals(object obj)

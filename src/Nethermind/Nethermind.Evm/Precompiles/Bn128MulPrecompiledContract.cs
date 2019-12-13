@@ -20,6 +20,7 @@ using System;
 using Nethermind.Core;
 using Nethermind.Core.Crypto.ZkSnarks;
 using Nethermind.Core.Extensions;
+using Nethermind.Core.Specs;
 
 namespace Nethermind.Evm.Precompiles
 {
@@ -36,18 +37,20 @@ namespace Nethermind.Evm.Precompiles
 
         public Address Address { get; } = Address.FromNumber(7);
 
-        public long BaseGasCost()
+        public long BaseGasCost(IReleaseSpec releaseSpec)
         {
-            return 40000L;
+            return releaseSpec.IsEip1108Enabled ? 6000L : 40000L;
         }
 
-        public long DataGasCost(byte[] inputData)
+        public long DataGasCost(byte[] inputData, IReleaseSpec releaseSpec = null)
         {
             return 0L;
         }
 
         public (byte[], bool) Run(byte[] inputData)
         {
+            Metrics.Bn128MulPrecompile++;
+            
             if (inputData == null)
             {
                 inputData = Bytes.Empty;
@@ -78,13 +81,9 @@ namespace Nethermind.Evm.Precompiles
 
             byte[] result = new byte[64];
 
-            // TODO: do I need to strip leading zeros here?
-            w1 = w1.WithoutLeadingZeros();
-            w2 = w2.WithoutLeadingZeros();
-
-            Buffer.BlockCopy(w1, 0, result, 32 - w1.Length, w1.Length);
-            Buffer.BlockCopy(w2, 0, result, 64 - w2.Length, w2.Length);
-
+            // TODO: do I need to strip leading zeros here? // probably not
+            w1.WithoutLeadingZeros().CopyTo(result.AsSpan().Slice(32 - w1.Length, w1.Length));
+            w2.WithoutLeadingZeros().CopyTo(result.AsSpan().Slice(64 - w2.Length, w2.Length));
             return result;
         }
     }

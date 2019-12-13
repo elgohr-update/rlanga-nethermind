@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
-    <LangVersion>7.2</LangVersion>
+    <TargetFramework>netcoreapp3.0</TargetFramework>
+    <LangVersion>8.0</LangVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Nethermind.Blockchain\Nethermind.Blockchain.csproj">
@@ -18,9 +18,9 @@
     <ProjectReference Include="..\Nethermind.Stats\Nethermind.Stats.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="DotNetty.Handlers" Version="0.5.0" />
+    <PackageReference Include="DotNetty.Handlers" Version="0.6.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="2.1.1" />
-    <PackageReference Include="Portable.BouncyCastle" Version="1.8.3" />
+    <PackageReference Include="Portable.BouncyCastle" Version="1.8.5" />
     <PackageReference Include="Snappy.Standard" Version="0.2.0" />
   </ItemGroup>
   <ItemGroup>

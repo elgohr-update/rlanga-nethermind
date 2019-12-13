@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netcoreapp2.1</TargetFramework>
-    <LangVersion>7.2</LangVersion>
+    <TargetFramework>netcoreapp3.0</TargetFramework>
+    <LangVersion>8.0</LangVersion>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\rocksdb-sharp\RocksDbNative\RocksDbNative.csproj" />
@@ -11,19 +11,5 @@
       <Project>{8311E4F7-DB36-40F5-A496-7CE4FD486FEE}</Project>
       <Name>Nethermind.Store</Name>
     </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="./External/Mac/librocksdb-5.15.10.dylib" Link="librocksdb-5.15.10.dylib">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="./External/Posix/librocksdb-5.15.10.so" Link="librocksdb-5.15.10.so">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Include="./External/Win64/rocksdb.dll" Link="rocksdb.dll">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="External\Win64" />
   </ItemGroup>
 </Project>

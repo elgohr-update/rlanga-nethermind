@@ -17,11 +17,11 @@
  */
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Nethermind.Core;
 using Nethermind.Core.Crypto;
-using Nethermind.Dirichlet.Numerics;
 
 namespace Nethermind.Blockchain
 {
@@ -36,44 +36,82 @@ namespace Nethermind.Blockchain
 
         public int ChainId => _wrapped.ChainId;
         public BlockHeader Genesis => _wrapped.Genesis;
-        public BlockHeader BestSuggested => _wrapped.BestSuggested;
-        public UInt256 BestKnownNumber => _wrapped.BestKnownNumber;
+        public BlockHeader BestSuggestedHeader => _wrapped.BestSuggestedHeader;
+        public BlockHeader LowestInsertedHeader => _wrapped.LowestInsertedHeader;
+        public Block LowestInsertedBody => _wrapped.LowestInsertedBody;
+        public Block BestSuggestedBody => _wrapped.BestSuggestedBody;
+        public long BestKnownNumber => _wrapped.BestKnownNumber;
         public BlockHeader Head => _wrapped.Head;
         public bool CanAcceptNewBlocks { get; } = false;
 
-        public Task LoadBlocksFromDb(CancellationToken cancellationToken, UInt256? startBlockNumber, int batchSize = BlockTree.DbLoadBatchSize, int maxBlocksToLoad = Int32.MaxValue)
+        public Task LoadBlocksFromDb(CancellationToken cancellationToken, long? startBlockNumber, int batchSize = BlockTree.DbLoadBatchSize, int maxBlocksToLoad = Int32.MaxValue)
         {
             throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(LoadBlocksFromDb)} calls");
         }
 
-        public AddBlockResult SuggestBlock(Block block)
+        public Task FixFastSyncGaps(CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(FixFastSyncGaps)} calls");
+        }
+
+        public AddBlockResult Insert(Block block)
+        {
+            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(Insert)} calls");
+        }
+
+        public void Insert(IEnumerable<Block> blocks)
+        {
+            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(Insert)} calls");
+        }
+
+        public AddBlockResult SuggestBlock(Block block, bool shouldProcess = true)
         {
             throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(SuggestBlock)} calls");
         }
 
-        public Block FindBlock(Keccak blockHash, bool mainChainOnly)
+        public AddBlockResult Insert(BlockHeader header)
         {
-            return _wrapped.FindBlock(blockHash, mainChainOnly);
+            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(Insert)} calls");
         }
 
-        public BlockHeader FindHeader(Keccak blockHash)
+        public AddBlockResult SuggestHeader(BlockHeader header)
         {
-            return _wrapped.FindHeader(blockHash);
+            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(SuggestHeader)} calls");
         }
 
-        public BlockHeader FindHeader(UInt256 blockNumber)
+        public Block FindBlock(Keccak blockHash, BlockTreeLookupOptions options)
         {
-            return _wrapped.FindHeader(blockNumber);
+            return _wrapped.FindBlock(blockHash, options);
         }
 
-        public Block[] FindBlocks(Keccak blockHash, int numberOfBlocks, int skip, bool reverse)
+        public BlockHeader FindHeader(Keccak blockHash, BlockTreeLookupOptions options)
         {
-            return _wrapped.FindBlocks(blockHash, numberOfBlocks, skip, reverse);
+            return _wrapped.FindHeader(blockHash, options);
         }
 
-        public Block FindBlock(UInt256 blockNumber)
+        public BlockHeader FindHeader(long blockNumber, BlockTreeLookupOptions options)
         {
-            return _wrapped.FindBlock(blockNumber);
+            return _wrapped.FindHeader(blockNumber, options);
+        }
+
+        public Keccak FindHash(long blockNumber)
+        {
+            return _wrapped.FindHash(blockNumber);
+        }
+        
+        public BlockHeader[] FindHeaders(Keccak hash, int numberOfBlocks, int skip, bool reverse)
+        {
+            return _wrapped.FindHeaders(hash, numberOfBlocks, skip, reverse);
+        }
+
+        public Block FindBlock(long blockNumber, BlockTreeLookupOptions options)
+        {
+            return _wrapped.FindBlock(blockNumber, options);
+        }
+
+        public void DeleteInvalidBlock(Block invalidBlock)
+        {
+            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(DeleteInvalidBlock)} calls");
         }
 
         public bool IsMainChain(Keccak blockHash)
@@ -81,34 +119,14 @@ namespace Nethermind.Blockchain
             return _wrapped.IsMainChain(blockHash);
         }
 
-        public bool IsKnownBlock(Keccak blockHash)
+        public bool IsKnownBlock(long number, Keccak blockHash)
         {
-            return _wrapped.IsKnownBlock(blockHash);
+            return _wrapped.IsKnownBlock(number, blockHash);
         }
 
-        public void MoveToMain(Block block)
+        public bool WasProcessed(long number, Keccak blockHash)
         {
-            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(MoveToMain)} calls");
-        }
-
-        public void MoveToMain(Keccak blockHash)
-        {
-            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(MoveToMain)} calls");
-        }
-
-        public void MoveToBranch(Keccak blockHash)
-        {
-            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(MoveToBranch)} calls");
-        }
-
-        public bool WasProcessed(Keccak blockHash)
-        {
-            return _wrapped.WasProcessed(blockHash);
-        }
-
-        public void MarkAsProcessed(Keccak blockHash)
-        {
-            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(MarkAsProcessed)} calls");
+            return _wrapped.WasProcessed(number, blockHash);
         }
 
         public event EventHandler<BlockEventArgs> NewBestSuggestedBlock
@@ -122,11 +140,16 @@ namespace Nethermind.Blockchain
             add { }
             remove { }
         }
-        
+
         public event EventHandler<BlockEventArgs> NewHeadBlock
         {
             add { }
             remove { }
+        }
+
+        public void UpdateMainChain(Block[] processedBlocks)
+        {
+            throw new InvalidOperationException($"{nameof(ReadOnlyBlockTree)} does not expect {nameof(UpdateMainChain)} calls");
         }
     }
 }

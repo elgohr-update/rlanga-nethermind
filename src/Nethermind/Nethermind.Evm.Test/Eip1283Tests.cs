@@ -17,10 +17,8 @@
  */
 
 using System;
-using Nethermind.Core;
 using Nethermind.Core.Extensions;
 using Nethermind.Core.Specs;
-using Nethermind.Dirichlet.Numerics;
 using Nethermind.Store;
 using NUnit.Framework;
 
@@ -29,7 +27,9 @@ namespace Nethermind.Evm.Test
     [TestFixture]
     public class Eip1283Tests : VirtualMachineTestsBase
     {
-        protected override UInt256 BlockNumber => MainNetSpecProvider.ConstantinopleBlockNumber;
+        protected override long BlockNumber => RopstenSpecProvider.ConstantinopleBlockNumber;
+        
+        protected override ISpecProvider SpecProvider => RopstenSpecProvider.Instance;
 
         [TestCase("0x60006000556000600055", 412, 0, 0)]
         [TestCase("0x60006000556001600055", 20212, 0, 0)]
@@ -52,10 +52,10 @@ namespace Nethermind.Evm.Test
         {
             TestState.CreateAccount(Recipient, 0);
             Storage.Set(new StorageAddress(Recipient, 0), new [] {originalValue});
-            Storage.Commit(RopstenSpecProvider.Instance.GenesisSpec);
+            Storage.Commit();
             TestState.Commit(RopstenSpecProvider.Instance.GenesisSpec);
             
-            TransactionReceipt receipt = Execute(Bytes.FromHexString(codeHex));
+            var receipt = Execute(Bytes.FromHexString(codeHex));
             AssertGas(receipt, gasUsed + GasCostOf.Transaction - Math.Min((gasUsed + GasCostOf.Transaction) / 2, refund));
         }
     }
